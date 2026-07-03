@@ -17,16 +17,6 @@ const MENU_ITEMS = [
     order: 1
   },
   {
-    id: "notice-board",
-    label: "Notice Board",
-    icon: "📌",
-    file: "pages/notice-board.html",
-    group: "General",
-    fullAccess: ["admin", "editor"],
-    limitedAccess: ["viewer"],
-    order: 2
-  },
-  {
     id: "manage-users",
     label: "Approve Users",
     icon: "✅",
