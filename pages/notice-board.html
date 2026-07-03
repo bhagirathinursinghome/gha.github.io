@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Notice Board — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">General</span>
+      <h2>Notice Board</h2>
+    </div>
+    <button class="btn btn-primary" id="addBtn" style="display:none">+ New notice</button>
+  </div>
+  <div id="listArea"></div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "notice-board"; // must match menu.js
+let myAccess = null;
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  if (myAccess.level === "full") {
+    const btn = document.getElementById("addBtn");
+    btn.style.display = "inline-flex";
+    btn.onclick = () => openNoticeModal(null);
+  }
+  await loadList();
+}
+
+async function loadList() {
+  const area = document.getElementById("listArea");
+  const { data, error } = await supabaseClient
+    .from("notices")
+    .select("notice_id, title, message, created_at, created_by, users:created_by(username)")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>Could not load notices: ${escapeHtml(error.message)}</p></div>`;
+    return;
+  }
+  if (!data.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">📌</div><p>No notices yet. ${myAccess.level !== "none" ? "Use the button above to add one." : ""}</p></div>`;
+    return;
+  }
+
+  area.innerHTML = `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Title</th><th>Message</th><th>Posted</th><th>By</th><th></th></tr></thead>
+    <tbody>
+      ${data.map(n => `
+        <tr>
+          <td><strong>${escapeHtml(n.title)}</strong></td>
+          <td>${escapeHtml(n.message)}</td>
+          <td>${formatDateTime(n.created_at)}</td>
+          <td>${escapeHtml(n.users ? n.users.username : "—")}</td>
+          <td class="row-actions">
+            ${myAccess.level === "full" ? `
+              <button class="icon-btn" title="Edit" data-edit="${n.notice_id}">✏️</button>
+              <button class="icon-btn" title="Delete" data-del="${n.notice_id}" data-title="${escapeHtml(n.title)}">🗑️</button>
+            ` : ""}
+          </td>
+        </tr>
+      `).join("")}
+    </tbody>
+  </table></div>`;
+
+  // wire up row buttons (avoids inline-JSON-in-HTML fragility)
+  area.querySelectorAll("[data-edit]").forEach(btn => {
+    btn.onclick = () => {
+      const row = data.find(n => n.notice_id === btn.dataset.edit);
+      openNoticeModal(row);
+    };
+  });
+  area.querySelectorAll("[data-del]").forEach(btn => {
+    btn.onclick = () => confirmDelete(btn.dataset.del, btn.dataset.title);
+  });
+}
+
+function openNoticeModal(existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? "Edit notice" : "New notice",
+    subtitle: isEdit ? "Update the details below" : "Visible to the whole school",
+    bodyHtml: `
+      <div class="field">
+        <label for="nTitle">Title</label>
+        <input class="input" id="nTitle" value="${isEdit ? escapeHtml(existing.title) : ""}" />
+        <div class="field-error" id="nTitleErr">Title is required.</div>
+      </div>
+      <div class="field">
+        <label for="nMsg">Message</label>
+        <textarea class="input" id="nMsg" rows="4">${isEdit ? escapeHtml(existing.message) : ""}</textarea>
+        <div class="field-error" id="nMsgErr">Message is required.</div>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveNoticeBtn">${isEdit ? "Save changes" : "Post notice"}</button>
+    `,
+    onOpen: () => {
+      document.getElementById("saveNoticeBtn").onclick = () => saveNotice(existing);
+    }
+  });
+}
+
+async function saveNotice(existing) {
+  const title = document.getElementById("nTitle").value.trim();
+  const message = document.getElementById("nMsg").value.trim();
+  let ok = true;
+  document.getElementById("nTitleErr").classList.toggle("show", !title); if (!title) ok = false;
+  document.getElementById("nMsgErr").classList.toggle("show", !message); if (!message) ok = false;
+  if (!ok) return;
+
+  const btn = document.getElementById("saveNoticeBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  if (existing) {
+    const record = await withAuditStamp({ title, message }, { isNew: false });
+    const { error } = await supabaseClient.from("notices").update(record).eq("notice_id", existing.notice_id);
+    if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Save changes"; return; }
+    await logAudit("notices", existing.notice_id, "update", { title: existing.title, message: existing.message }, record);
+    showToast("Notice updated.", "success");
+  } else {
+    const record = await withAuditStamp({ title, message }, { isNew: true });
+    const { data, error } = await supabaseClient.from("notices").insert(record).select().single();
+    if (error) { showToast("Post failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Post notice"; return; }
+    await logAudit("notices", data.notice_id, "insert", null, record);
+    showToast("Notice posted.", "success");
+  }
+
+  closeModal();
+  await loadList();
+}
+
+function confirmDelete(noticeId, title) {
+  openModal({
+    title: "Delete notice?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete "<strong>${escapeHtml(title)}</strong>"?</p>`,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-danger" id="confirmDelBtn">Delete</button>
+    `,
+    onOpen: () => {
+      document.getElementById("confirmDelBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("notices").delete().eq("notice_id", noticeId);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("notices", noticeId, "delete", { title }, null);
+        closeModal();
+        showToast("Notice deleted.", "success");
+        await loadList();
+      };
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>

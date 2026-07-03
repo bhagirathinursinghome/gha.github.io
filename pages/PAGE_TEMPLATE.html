@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Page Title — Greenfield High Portal</title>
+
+<!-- ⬇⬇ every module page loads EXACTLY these three shared files, in this order ⬇⬇ -->
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Section name</span>
+      <h2>Page Title</h2>
+    </div>
+    <!-- "Add" button only rendered for full-access users, see script below -->
+    <button class="btn btn-primary" id="addBtn" style="display:none">+ Add item</button>
+  </div>
+
+  <div id="listArea"><!-- table / cards rendered here by JS --></div>
+</div>
+
+<!-- required on every page that uses popups/toasts -->
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+// 1. every page declares its own id, matching menu.js exactly
+const PAGE_ID = "REPLACE-WITH-MENU-ID";
+
+let myAccess = null; // { profile, level: "full" | "limited" | "none" }
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return; // requireActiveUser() already showed a message
+
+  if (myAccess.level === "full") {
+    document.getElementById("addBtn").style.display = "inline-flex";
+    document.getElementById("addBtn").onclick = openAddModal;
+  }
+
+  await loadList();
+}
+
+async function loadList() {
+  // fetch + render your data here
+}
+
+function openAddModal() {
+  // use openModal({...}) from common.js — see HOW_TO_ADD_PAGE.md for a full example
+}
+
+init();
+</script>
+</body>
+</html>

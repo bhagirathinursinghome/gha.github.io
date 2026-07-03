@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Manage Roles — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Administration</span>
+      <h2>Manage Roles</h2>
+    </div>
+    <button class="btn btn-primary" id="addBtn" style="display:none">+ New role</button>
+  </div>
+  <p style="margin-top:-8px">Roles created here can then be granted per-page access in <code>assets/js/menu.js</code> (fullAccess / limitedAccess arrays).</p>
+  <div id="listArea"></div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "manage-roles";
+let myAccess = null;
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+  if (myAccess.level !== "full") {
+    document.getElementById("listArea").innerHTML = `<div class="empty-state"><div class="icon">🔒</div><p>You don't have access to this page.</p></div>`;
+    return;
+  }
+  document.getElementById("addBtn").style.display = "inline-flex";
+  document.getElementById("addBtn").onclick = openAddRoleModal;
+  await loadList();
+}
+
+async function loadList() {
+  const area = document.getElementById("listArea");
+  const { data, error } = await supabaseClient
+    .from("roles")
+    .select("role_id, role_name, created_at, users:created_by(username)")
+    .order("created_at");
+
+  if (error) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${escapeHtml(error.message)}</p></div>`;
+    return;
+  }
+
+  area.innerHTML = `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Role</th><th>Created</th><th>Created by</th></tr></thead>
+    <tbody>
+      ${data.map(r => `
+        <tr>
+          <td><strong>${escapeHtml(r.role_name)}</strong>${DEFAULT_ROLES.includes(r.role_name) ? ' <span class="badge badge-neutral">Default</span>' : ""}</td>
+          <td>${formatDateTime(r.created_at)}</td>
+          <td>${r.users ? escapeHtml(r.users.username) : "—"}</td>
+        </tr>
+      `).join("")}
+    </tbody>
+  </table></div>`;
+}
+
+function openAddRoleModal() {
+  openModal({
+    title: "New role",
+    subtitle: "e.g. \"librarian\", \"accountant\", \"class-teacher\"",
+    bodyHtml: `
+      <div class="field">
+        <label for="roleName">Role name</label>
+        <input class="input" id="roleName" placeholder="e.g. librarian" pattern="[a-z0-9\\-]+" title="Lowercase letters, numbers and hyphens only" />
+        <div class="hint">Use lowercase, no spaces (use hyphens) — this exact string is what you'll reference in menu.js.</div>
+        <div class="field-error" id="roleErr">Role name is required.</div>
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveRoleBtn">Create role</button>
+    `,
+    onOpen: () => {
+      document.getElementById("saveRoleBtn").onclick = saveRole;
+    }
+  });
+}
+
+async function saveRole() {
+  const name = document.getElementById("roleName").value.trim().toLowerCase();
+  const errEl = document.getElementById("roleErr");
+  if (!name) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("saveRoleBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const record = await withAuditStamp({ role_name: name }, { isNew: true });
+  delete record.updated_by; delete record.updated_at; // roles table has no updated_* columns
+  const { data, error } = await supabaseClient.from("roles").insert(record).select().single();
+
+  if (error) { showToast("Create failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Create role"; return; }
+
+  await logAudit("roles", data.role_id, "insert", null, record);
+  closeModal();
+  showToast(`Role "${name}" created. Add it to menu.js to grant page access.`, "success");
+  await loadList();
+}
+
+init();
+</script>
+</body>
+</html>

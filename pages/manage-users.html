@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Approve Users — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .filter-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-tabs button { border: 1px solid var(--line); background: #fff; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-soft); }
+  .filter-tabs button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Administration</span>
+      <h2>Approve Users</h2>
+    </div>
+  </div>
+
+  <div class="filter-tabs" id="filterTabs">
+    <button data-f="pending" class="active">Pending</button>
+    <button data-f="active">Active</button>
+    <button data-f="deactivated">Deactivated</button>
+    <button data-f="all">All</button>
+  </div>
+
+  <div id="listArea"></div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "manage-users";
+let myAccess = null;
+let roles = [];
+let currentFilter = "pending";
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+  if (myAccess.level !== "full") {
+    document.getElementById("listArea").innerHTML = `<div class="empty-state"><div class="icon">🔒</div><p>You don't have access to this page.</p></div>`;
+    return;
+  }
+
+  const { data } = await supabaseClient.from("roles").select("role_id, role_name").order("role_name");
+  roles = data || [];
+
+  document.querySelectorAll("#filterTabs button").forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll("#filterTabs button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentFilter = btn.dataset.f;
+      loadList();
+    };
+  });
+
+  await loadList();
+}
+
+async function loadList() {
+  const area = document.getElementById("listArea");
+  let query = supabaseClient
+    .from("users")
+    .select("user_id, username, mobile_no, status, created_at, role_id, roles(role_name)")
+    .order("created_at", { ascending: false });
+  if (currentFilter !== "all") query = query.eq("status", currentFilter);
+
+  const { data, error } = await query;
+  if (error) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${escapeHtml(error.message)}</p></div>`;
+    return;
+  }
+  if (!data.length) {
+    area.innerHTML = `<div class="empty-state"><div class="icon">👥</div><p>No users in this list.</p></div>`;
+    return;
+  }
+
+  area.innerHTML = `<div class="table-wrap"><table class="data">
+    <thead><tr><th>Username</th><th>Mobile</th><th>Role</th><th>Status</th><th>Requested</th><th></th></tr></thead>
+    <tbody>
+      ${data.map(u => `
+        <tr>
+          <td><strong>${escapeHtml(u.username)}</strong></td>
+          <td>${escapeHtml(u.mobile_no)}</td>
+          <td>${u.roles ? escapeHtml(u.roles.role_name) : '<span class="badge badge-neutral">Unassigned</span>'}</td>
+          <td>${statusBadge(u.status)}</td>
+          <td>${formatDateTime(u.created_at)}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost" data-manage="${u.user_id}">Manage</button></td>
+        </tr>
+      `).join("")}
+    </tbody>
+  </table></div>`;
+
+  area.querySelectorAll("[data-manage]").forEach(btn => {
+    btn.onclick = () => {
+      const row = data.find(u => u.user_id === btn.dataset.manage);
+      openManageModal(row);
+    };
+  });
+}
+
+function openManageModal(user) {
+  const roleOptions = roles.map(r => `<option value="${r.role_id}" ${user.role_id === r.role_id ? "selected" : ""}>${escapeHtml(r.role_name)}</option>`).join("");
+  openModal({
+    title: user.username,
+    subtitle: `Requested ${formatDateTime(user.created_at)}`,
+    bodyHtml: `
+      <div class="field"><label>Mobile number</label><div>${escapeHtml(user.mobile_no)}</div></div>
+      <div class="field">
+        <label for="roleSelect">Role</label>
+        <select class="input" id="roleSelect">
+          <option value="">— Select role —</option>
+          ${roleOptions}
+        </select>
+      </div>
+      <div class="field">
+        <label for="statusSelect">Status</label>
+        <select class="input" id="statusSelect">
+          <option value="pending" ${user.status === "pending" ? "selected" : ""}>Pending</option>
+          <option value="active" ${user.status === "active" ? "selected" : ""}>Active</option>
+          <option value="deactivated" ${user.status === "deactivated" ? "selected" : ""}>Deactivated</option>
+        </select>
+      </div>
+      <div class="field-error" id="manageErr">A role must be selected to activate a user.</div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveUserBtn">Save</button>
+    `,
+    onOpen: () => {
+      document.getElementById("saveUserBtn").onclick = () => saveUser(user);
+    }
+  });
+}
+
+async function saveUser(user) {
+  const roleId = document.getElementById("roleSelect").value;
+  const status = document.getElementById("statusSelect").value;
+  const errEl = document.getElementById("manageErr");
+
+  if (status === "active" && !roleId) { errEl.classList.add("show"); return; }
+  errEl.classList.remove("show");
+
+  const btn = document.getElementById("saveUserBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const record = await withAuditStamp({ role_id: roleId || null, status }, { isNew: false });
+  const { error } = await supabaseClient.from("users").update(record).eq("user_id", user.user_id);
+
+  if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Save"; return; }
+
+  await logAudit("users", user.user_id, "update", { role_id: user.role_id, status: user.status }, record);
+  closeModal();
+  showToast(`${user.username} updated.`, "success");
+  await loadList();
+}
+
+init();
+</script>
+</body>
+</html>

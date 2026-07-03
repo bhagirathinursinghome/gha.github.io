@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Dashboard — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<style>
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-top: 6px; }
+  .stat-card { padding: 18px; }
+  .stat-card .n { font-family: var(--font-display); font-size: 28px; font-weight: 600; }
+  .stat-card .l { font-size: 12.5px; color: var(--ink-faint); margin-top: 2px; }
+  .welcome-banner {
+    background: linear-gradient(135deg, var(--ink), var(--ink-2));
+    color: #fff; border-radius: var(--radius-lg); padding: 26px 24px; margin-bottom: 18px;
+    position: relative; overflow: hidden;
+  }
+  .welcome-banner::after {
+    content: ""; position: absolute; right: -40px; top: -40px; width: 180px; height: 180px;
+    border-radius: 50%; background: rgba(199,154,61,0.18);
+  }
+  .welcome-banner h2 { color: #fff; margin-bottom: 4px; }
+  .welcome-banner p { color: rgba(255,255,255,0.75); }
+</style>
+</head>
+<body>
+<div class="page-wrap enter-up">
+  <div class="welcome-banner">
+    <h2 id="hello">Welcome</h2>
+    <p id="roleLine">—</p>
+  </div>
+
+  <div class="stat-grid" id="statGrid">
+    <div class="card stat-card"><div class="n skeleton" style="width:40px;height:26px"></div><div class="l">Active users</div></div>
+    <div class="card stat-card"><div class="n skeleton" style="width:40px;height:26px"></div><div class="l">Pending approvals</div></div>
+    <div class="card stat-card"><div class="n skeleton" style="width:40px;height:26px"></div><div class="l">Roles</div></div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "dashboard";
+
+async function init() {
+  const { profile } = await getMyAccess(PAGE_ID);
+  if (!profile) return;
+
+  document.getElementById("hello").textContent = `Welcome back, ${profile.username}`;
+  document.getElementById("roleLine").textContent = `Signed in as ${profile.role_name}`;
+
+  const grid = document.getElementById("statGrid");
+  // Admin-only counts; other roles just see the welcome banner cards hidden gracefully.
+  if (profile.role_name === "admin") {
+    const [{ count: activeCount }, { count: pendingCount }, { count: roleCount }] = await Promise.all([
+      supabaseClient.from("users").select("*", { count: "exact", head: true }).eq("status", "active"),
+      supabaseClient.from("users").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      supabaseClient.from("roles").select("*", { count: "exact", head: true })
+    ]);
+    grid.innerHTML = `
+      <div class="card stat-card"><div class="n">${activeCount ?? 0}</div><div class="l">Active users</div></div>
+      <div class="card stat-card"><div class="n">${pendingCount ?? 0}</div><div class="l">Pending approvals</div></div>
+      <div class="card stat-card"><div class="n">${roleCount ?? 0}</div><div class="l">Roles</div></div>
+    `;
+  } else {
+    grid.style.display = "none";
+  }
+}
+init();
+</script>
+</body>
+</html>
