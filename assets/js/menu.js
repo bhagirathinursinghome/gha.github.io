@@ -22,10 +22,10 @@ const MENU_ITEMS = [
   icon: "🎓",
   file: "pages/admission.html",
   group: "Academics",
-  fullAccess: ["admin"],            // can add, edit AND delete
-  limitedAccess: ["editor", "viewer"], // can only view + add new records
-  order: 6
-},
+  fullAccess: ["admin", "editor"],   // can add/edit/delete/deactivate
+  limitedAccess: ["viewer"],         // can add (admission/readmission) only
+  order: 3
+   },
   {
     id: "manage-users",
     label: "Approve Users",
