@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admission — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<!-- SheetJS, used only for the "Download Template" / "Bulk Upload" excel features -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<div class="page-wrap enter-up">
+  <div class="page-header">
+    <div>
+      <span class="eyebrow">Academics</span>
+      <h1>Admission</h1>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" id="templateBtn">⬇️ Download Template</button>
+      <button class="btn btn-ghost btn-sm" id="bulkBtn" style="display:none;">⬆️ Bulk Upload</button>
+      <button class="btn btn-primary" id="addBtn" style="display:none;">+ Admission</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="field" style="max-width:320px;">
+      <label for="searchBox">Search</label>
+      <input class="input" id="searchBox" placeholder="Reg no, name or father name..." />
+    </div>
+
+    <div class="table-wrap">
+      <table class="data" id="studentTable">
+        <thead>
+          <tr>
+            <th>Reg No</th>
+            <th>Name</th>
+            <th>Father Name</th>
+            <th>Class</th>
+            <th>Mobile</th>
+            <th>Admission Date</th>
+            <th>Admission Fee</th>
+            <th>Monthly Fee</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="listArea"></tbody>
+      </table>
+    </div>
+
+    <div id="emptyState" class="empty-state" style="display:none;">
+      <div class="icon">🎓</div>
+      <p>No students found.</p>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot" class="toast-stack"></div>
+
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<script>
+/* ============================================================
+   Admission page
+   - student_master: one row per student, current details.
+   - fee_master: append-only. Every admission / re-admission /
+     fee change inserts a NEW row. The latest row per reg_no is
+     the current fee (see the current_fee_master view).
+
+   ACCESS DECISIONS (not fully specified in the request, adjust
+   sql/admission_module.sql RLS policies + this file together if
+   you want it different):
+   - "Admit New Student" (insert only) -> full AND limited access.
+   - "Re-Admit" / "Edit" / "Delete" on an existing student, and
+     editing/deleting individual fee_master rows -> full access
+     only, because they all touch an EXISTING row, and the
+     project's hard rule is "edit/delete any record" = full
+     access only.
+   - Bulk upload can create AND update existing students (a row
+     with an existing reg_no = re-admission), so it is treated
+     as an edit-capable action -> full access only. "Download
+     Template" is harmless and available to both.
+   ============================================================ */
+
+const PAGE_ID = "admission";
+let myAccess = null;
+let allStudents = [];       // [{...student_master fields, fee: {...current fee_master row}|null}]
+let feeHistoryCache = {};   // fee_id -> fee_master row, populated while a Fee History modal is open
+
+const CLASS_OPTIONS = [
+  "4", "5", "6", "7", "8", "9", "10",
+  "11-science", "11-arts", "12-science", "12-arts"
+];
+
+function classLabel(c) {
+  if (c.includes("-")) {
+    const [num, stream] = c.split("-");
+    return `Class ${num} - ${stream.charAt(0).toUpperCase()}${stream.slice(1)}`;
+  }
+  return `Class ${c}`;
+}
+
+function classOptionsHtml(selected) {
+  return CLASS_OPTIONS.map(
+    c => `<option value="${c}" ${c === selected ? "selected" : ""}>${classLabel(c)}</option>`
+  ).join("");
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return; // requireActiveUser() already showed a message
+
+  // Admit New Student: full + limited access
+  document.getElementById("addBtn").style.display = "inline-flex";
+  document.getElementById("addBtn").onclick = () => openAdmissionModal(null);
+
+  // Download Template: full + limited access
+  document.getElementById("templateBtn").onclick = downloadTemplate;
+
+  // Bulk Upload: full access only (see note at top of this script)
+  if (myAccess.level === "full") {
+    document.getElementById("bulkBtn").style.display = "inline-flex";
+    document.getElementById("bulkBtn").onclick = openBulkUploadModal;
+  }
+
+  document.getElementById("searchBox").oninput = (e) => renderTable(e.target.value);
+
+  await loadList();
+}
+
+async function loadList() {
+  const { data: students, error } = await supabaseClient
+    .from("student_master")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) { showToast("Failed to load students: " + error.message, "error"); return; }
+
+  const { data: fees, error: feeErr } = await supabaseClient
+    .from("current_fee_master")
+    .select("*");
+  if (feeErr) { showToast("Failed to load fee data: " + feeErr.message, "error"); return; }
+
+  const feeByReg = {};
+  fees.forEach(f => { feeByReg[f.reg_no] = f; });
+  allStudents = students.map(s => ({ ...s, fee: feeByReg[s.reg_no] || null }));
+
+  renderTable(document.getElementById("searchBox").value);
+}
+
+function renderTable(filterText) {
+  const q = (filterText || "").trim().toLowerCase();
+  const rows = allStudents.filter(s =>
+    !q ||
+    s.reg_no.toLowerCase().includes(q) ||
+    s.student_name.toLowerCase().includes(q) ||
+    s.father_name.toLowerCase().includes(q)
+  );
+
+  const tbody = document.getElementById("listArea");
+  const table = document.getElementById("studentTable");
+  const empty = document.getElementById("emptyState");
+
+  if (!rows.length) {
+    table.style.display = "none";
+    empty.style.display = "block";
+    tbody.innerHTML = "";
+    return;
+  }
+  table.style.display = "";
+  empty.style.display = "none";
+
+  tbody.innerHTML = rows.map(s => `
+    <tr>
+      <td>${escapeHtml(s.reg_no)}</td>
+      <td>${escapeHtml(s.student_name)}</td>
+      <td>${escapeHtml(s.father_name)}</td>
+      <td><span class="badge badge-neutral">${classLabel(s.class)}</span></td>
+      <td>${escapeHtml(s.mobile_no)}</td>
+      <td>${escapeHtml(s.admission_date)}</td>
+      <td>${s.fee ? Number(s.fee.admission_fee).toFixed(2) : "-"}</td>
+      <td>${s.fee ? Number(s.fee.monthly_fee).toFixed(2) : "-"}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-ghost btn-sm" onclick="openFeeHistoryModal('${s.reg_no}')">Fee History</button>
+        ${myAccess.level === "full" ? `
+          <button class="btn btn-ghost btn-sm" onclick="openReAdmitModal('${s.reg_no}')">Re-Admit</button>
+          <button class="btn btn-ghost btn-sm" onclick="openEditDetailsModal('${s.reg_no}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${s.reg_no}')">Delete</button>
+        ` : ""}
+      </td>
+    </tr>
+  `).join("");
+}
+
+/* ---------------- Admit new / Re-admit ---------------- */
+
+function openReAdmitModal(regNo) {
+  const existing = allStudents.find(s => s.reg_no === regNo);
+  if (!existing) { showToast("Student not found.", "error"); return; }
+  openAdmissionModal(existing);
+}
+
+function openAdmissionModal(existing) {
+  const isReadmit = !!existing;
+  openModal({
+    title: isReadmit ? `Re-Admit: ${escapeHtml(existing.student_name)}` : "Admit New Student",
+    subtitle: isReadmit
+      ? `Reg No ${escapeHtml(existing.reg_no)} — update details and enter the new fee`
+      : "Enter the new student's details",
+    wide: true,
+    bodyHtml: `
+      <div class="field">
+        <label for="aRegNo">Reg No</label>
+        <input class="input" id="aRegNo" value="${isReadmit ? escapeHtml(existing.reg_no) : ""}" ${isReadmit ? "disabled" : ""} />
+        <div class="field-error" id="aRegNoErr">Reg no is required.</div>
+      </div>
+      <div class="field">
+        <label for="aName">Student Name</label>
+        <input class="input" id="aName" value="${isReadmit ? escapeHtml(existing.student_name) : ""}" />
+        <div class="field-error" id="aNameErr">Name is required.</div>
+      </div>
+      <div class="field">
+        <label for="aFather">Father Name</label>
+        <input class="input" id="aFather" value="${isReadmit ? escapeHtml(existing.father_name) : ""}" />
+        <div class="field-error" id="aFatherErr">Father name is required.</div>
+      </div>
+      <div class="field">
+        <label for="aClass">Class</label>
+        <select class="input" id="aClass">${classOptionsHtml(isReadmit ? existing.class : "")}</select>
+      </div>
+      <div class="field">
+        <label for="aMobile">Mobile No</label>
+        <input class="input" id="aMobile" value="${isReadmit ? escapeHtml(existing.mobile_no) : ""}" />
+        <div class="field-error" id="aMobileErr">Mobile no is required.</div>
+      </div>
+      <div class="field">
+        <label for="aDate">Admission Date</label>
+        <input class="input" type="date" id="aDate" value="${todayISO()}" />
+      </div>
+      <div class="field">
+        <label for="aAdmFee">Admission Fee</label>
+        <input class="input" type="number" min="0" step="0.01" id="aAdmFee" value="${isReadmit && existing.fee ? existing.fee.admission_fee : "0"}" />
+      </div>
+      <div class="field">
+        <label for="aMonFee">Monthly Fee</label>
+        <input class="input" type="number" min="0" step="0.01" id="aMonFee" value="${isReadmit && existing.fee ? existing.fee.monthly_fee : "0"}" />
+      </div>
+      <div class="field">
+        <label for="aRemark">Remark (optional)</label>
+        <input class="input" id="aRemark" value="" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveAdmBtn">${isReadmit ? "Save Re-Admission" : "Admit Student"}</button>
+    `,
+    onOpen: () => { document.getElementById("saveAdmBtn").onclick = () => saveAdmission(existing); }
+  });
+}
+
+async function saveAdmission(existing) {
+  const isReadmit = !!existing;
+  const regNo = document.getElementById("aRegNo").value.trim();
+  const name = document.getElementById("aName").value.trim();
+  const father = document.getElementById("aFather").value.trim();
+  const cls = document.getElementById("aClass").value;
+  const mobile = document.getElementById("aMobile").value.trim();
+  const admDate = document.getElementById("aDate").value;
+  const admFee = Number(document.getElementById("aAdmFee").value) || 0;
+  const monFee = Number(document.getElementById("aMonFee").value) || 0;
+  const remark = document.getElementById("aRemark").value.trim() || null;
+
+  let ok = true;
+  const setErr = (id, show) => document.getElementById(id).classList[show ? "add" : "remove"]("show");
+  setErr("aRegNoErr", !regNo); if (!regNo) ok = false;
+  setErr("aNameErr", !name); if (!name) ok = false;
+  setErr("aFatherErr", !father); if (!father) ok = false;
+  setErr("aMobileErr", !mobile); if (!mobile) ok = false;
+  if (!isReadmit && allStudents.some(s => s.reg_no === regNo)) {
+    showToast("A student with this Reg No already exists. Use Re-Admit instead.", "error");
+    ok = false;
+  }
+  if (!ok) return;
+
+  const btn = document.getElementById("saveAdmBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const studentRecord = {
+    reg_no: regNo, student_name: name, father_name: father,
+    class: cls, mobile_no: mobile, admission_date: admDate
+  };
+
+  if (isReadmit) {
+    const record = await withAuditStamp(studentRecord, { isNew: false });
+    const { error } = await supabaseClient.from("student_master").update(record).eq("reg_no", existing.reg_no);
+    if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Save Re-Admission"; return; }
+    await logAudit("student_master", existing.reg_no, "update", existing, record);
+  } else {
+    const record = await withAuditStamp(studentRecord, { isNew: true });
+    const { data, error } = await supabaseClient.from("student_master").insert(record).select().single();
+    if (error) { showToast("Admission failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Admit Student"; return; }
+    await logAudit("student_master", data.reg_no, "insert", null, record);
+  }
+
+  // Always append a new fee_master row (this is the admission / re-admission fee event)
+  const feeRecord = await withAuditStamp(
+    { reg_no: regNo, admission_fee: admFee, monthly_fee: monFee, remark },
+    { isNew: true }
+  );
+  const { data: feeData, error: feeErr } = await supabaseClient.from("fee_master").insert(feeRecord).select().single();
+  if (feeErr) { showToast("Student saved, but the fee entry failed: " + feeErr.message, "error"); return; }
+  await logAudit("fee_master", feeData.fee_id, "insert", null, feeRecord);
+
+  showToast(isReadmit ? "Student re-admitted." : "Student admitted.", "success");
+  closeModal();
+  await loadList();
+}
+
+/* ---------------- Edit details only (no new fee row) ---------------- */
+
+function openEditDetailsModal(regNo) {
+  const existing = allStudents.find(s => s.reg_no === regNo);
+  if (!existing) { showToast("Student not found.", "error"); return; }
+  openModal({
+    title: "Edit Student Details",
+    subtitle: `Reg No ${escapeHtml(existing.reg_no)} — this does not touch fee history`,
+    bodyHtml: `
+      <div class="field">
+        <label for="eName">Student Name</label>
+        <input class="input" id="eName" value="${escapeHtml(existing.student_name)}" />
+      </div>
+      <div class="field">
+        <label for="eFather">Father Name</label>
+        <input class="input" id="eFather" value="${escapeHtml(existing.father_name)}" />
+      </div>
+      <div class="field">
+        <label for="eClass">Class</label>
+        <select class="input" id="eClass">${classOptionsHtml(existing.class)}</select>
+      </div>
+      <div class="field">
+        <label for="eMobile">Mobile No</label>
+        <input class="input" id="eMobile" value="${escapeHtml(existing.mobile_no)}" />
+      </div>
+      <div class="field">
+        <label for="eDate">Admission Date</label>
+        <input class="input" type="date" id="eDate" value="${escapeHtml(existing.admission_date)}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="saveEditBtn">Save Changes</button>
+    `,
+    onOpen: () => {
+      document.getElementById("saveEditBtn").onclick = async () => {
+        const record = await withAuditStamp({
+          student_name: document.getElementById("eName").value.trim(),
+          father_name: document.getElementById("eFather").value.trim(),
+          class: document.getElementById("eClass").value,
+          mobile_no: document.getElementById("eMobile").value.trim(),
+          admission_date: document.getElementById("eDate").value
+        }, { isNew: false });
+        const { error } = await supabaseClient.from("student_master").update(record).eq("reg_no", existing.reg_no);
+        if (error) { showToast("Update failed: " + error.message, "error"); return; }
+        await logAudit("student_master", existing.reg_no, "update", existing, record);
+        showToast("Student details updated.", "success");
+        closeModal();
+        await loadList();
+      };
+    }
+  });
+}
+
+function confirmDeleteStudent(regNo) {
+  const existing = allStudents.find(s => s.reg_no === regNo);
+  const name = existing ? existing.student_name : regNo;
+  openModal({
+    title: "Delete student?",
+    subtitle: "This permanently deletes the student AND their entire fee history. This cannot be undone.",
+    bodyHtml: `<p>Delete <strong>${escapeHtml(name)}</strong> (Reg No ${escapeHtml(regNo)})?</p>`,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-danger" id="confirmDelBtn">Delete</button>
+    `,
+    onOpen: () => {
+      document.getElementById("confirmDelBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("student_master").delete().eq("reg_no", regNo);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("student_master", regNo, "delete", existing || { reg_no: regNo }, null);
+        closeModal();
+        showToast("Student deleted.", "success");
+        await loadList();
+      };
+    }
+  });
+}
+
+/* ---------------- Fee history ---------------- */
+
+function openFeeHistoryModal(regNo) {
+  const student = allStudents.find(s => s.reg_no === regNo);
+  openModal({
+    title: `Fee History — ${student ? escapeHtml(student.student_name) : escapeHtml(regNo)}`,
+    subtitle: `Reg No ${escapeHtml(regNo)}`,
+    wide: true,
+    bodyHtml: `<div id="feeHistBody"><div class="skeleton" style="height:80px"></div></div>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Close</button>`,
+    onOpen: () => loadFeeHistory(regNo)
+  });
+}
+
+async function loadFeeHistory(regNo) {
+  const { data, error } = await supabaseClient
+    .from("fee_master")
+    .select("*")
+    .eq("reg_no", regNo)
+    .order("created_at", { ascending: false });
+
+  const el = document.getElementById("feeHistBody");
+  if (!el) return; // modal was closed before this resolved
+
+  if (error) { el.innerHTML = `<p>Failed to load: ${escapeHtml(error.message)}</p>`; return; }
+  if (!data.length) { el.innerHTML = `<div class="empty-state"><div class="icon">💰</div><p>No fee entries.</p></div>`; return; }
+
+  data.forEach(f => { feeHistoryCache[f.fee_id] = f; });
+
+  el.innerHTML = `
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Date</th><th>Admission Fee</th><th>Monthly Fee</th><th>Remark</th><th></th></tr></thead>
+        <tbody>
+          ${data.map((f, i) => `
+            <tr>
+              <td>${formatDateTime(f.created_at)} ${i === 0 ? '<span class="badge badge-success">Current</span>' : ""}</td>
+              <td>${Number(f.admission_fee).toFixed(2)}</td>
+              <td>${Number(f.monthly_fee).toFixed(2)}</td>
+              <td>${escapeHtml(f.remark || "-")}</td>
+              <td style="white-space:nowrap;">
+                ${myAccess.level === "full" ? `
+                  <button class="btn btn-ghost btn-sm" onclick="editFeeRow('${f.fee_id}')">Edit</button>
+                  <button class="btn btn-danger btn-sm" onclick="confirmDeleteFeeRow('${f.fee_id}')">Delete</button>
+                ` : ""}
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function editFeeRow(feeId) {
+  const f = feeHistoryCache[feeId];
+  if (!f) { showToast("Fee entry not found.", "error"); return; }
+  openModal({
+    title: "Edit Fee Entry",
+    bodyHtml: `
+      <div class="field">
+        <label for="efAdm">Admission Fee</label>
+        <input class="input" type="number" min="0" step="0.01" id="efAdm" value="${f.admission_fee}" />
+      </div>
+      <div class="field">
+        <label for="efMon">Monthly Fee</label>
+        <input class="input" type="number" min="0" step="0.01" id="efMon" value="${f.monthly_fee}" />
+      </div>
+      <div class="field">
+        <label for="efRem">Remark</label>
+        <input class="input" id="efRem" value="${escapeHtml(f.remark || "")}" />
+      </div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="efSaveBtn">Save</button>
+    `,
+    onOpen: () => {
+      document.getElementById("efSaveBtn").onclick = async () => {
+        const record = await withAuditStamp({
+          admission_fee: Number(document.getElementById("efAdm").value) || 0,
+          monthly_fee: Number(document.getElementById("efMon").value) || 0,
+          remark: document.getElementById("efRem").value.trim() || null
+        }, { isNew: false });
+        const { error } = await supabaseClient.from("fee_master").update(record).eq("fee_id", feeId);
+        if (error) { showToast("Update failed: " + error.message, "error"); return; }
+        await logAudit("fee_master", feeId, "update", f, record);
+        showToast("Fee entry updated.", "success");
+        closeModal();
+        await loadList();
+      };
+    }
+  });
+}
+
+function confirmDeleteFeeRow(feeId) {
+  const f = feeHistoryCache[feeId] || null;
+  openModal({
+    title: "Delete fee entry?",
+    subtitle: "This cannot be undone.",
+    bodyHtml: `<p>Delete this fee entry?</p>`,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-danger" id="confirmDelFeeBtn">Delete</button>
+    `,
+    onOpen: () => {
+      document.getElementById("confirmDelFeeBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("fee_master").delete().eq("fee_id", feeId);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("fee_master", feeId, "delete", f, null);
+        showToast("Fee entry deleted.", "success");
+        closeModal();
+        await loadList();
+      };
+    }
+  });
+}
+
+/* ---------------- Excel template + bulk upload ---------------- */
+
+function downloadTemplate() {
+  const headers = ["reg_no", "student_name", "father_name", "class", "mobile_no", "admission_date", "admission_fee", "monthly_fee", "remark"];
+  const sample = [{
+    reg_no: "2026/0001", student_name: "John Doe", father_name: "Richard Doe",
+    class: "6", mobile_no: "9876543210", admission_date: todayISO(),
+    admission_fee: 5000, monthly_fee: 800, remark: ""
+  }];
+  const ws = XLSX.utils.json_to_sheet(sample, { header: headers });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Admission");
+
+  const instructions = [
+    ["Allowed class values:"],
+    ...CLASS_OPTIONS.map(c => [c]),
+    [],
+    ["Notes:"],
+    ["- reg_no is the unique student ID."],
+    ["- If a reg_no already EXISTS, that row updates the student and RE-ADMITS them (a new fee entry is appended)."],
+    ["- If a reg_no does NOT exist, a new student is admitted."],
+    ["- admission_date format: YYYY-MM-DD"],
+    ["- admission_fee and monthly_fee: numbers only, no currency symbol."],
+    ["- remark is optional and may be left blank."]
+  ];
+  const infoWs = XLSX.utils.aoa_to_sheet(instructions);
+  XLSX.utils.book_append_sheet(wb, infoWs, "Instructions");
+
+  XLSX.writeFile(wb, "admission_template.xlsx");
+}
+
+function openBulkUploadModal() {
+  openModal({
+    title: "Bulk Upload Admissions",
+    subtitle: "Upload a filled copy of the template. Existing reg no = re-admission, new reg no = new admission.",
+    bodyHtml: `
+      <div class="field">
+        <label for="bulkFile">Excel File (.xlsx)</label>
+        <input class="input" type="file" id="bulkFile" accept=".xlsx,.xls" />
+      </div>
+      <div id="bulkStatus"></div>
+    `,
+    footHtml: `
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-primary" id="bulkGoBtn">Upload</button>
+    `,
+    onOpen: () => { document.getElementById("bulkGoBtn").onclick = runBulkUpload; }
+  });
+}
+
+async function runBulkUpload() {
+  const fileInput = document.getElementById("bulkFile");
+  const statusEl = document.getElementById("bulkStatus");
+  const file = fileInput.files[0];
+  if (!file) { showToast("Choose a file first.", "error"); return; }
+
+  const btn = document.getElementById("bulkGoBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+  let ok = 0, fail = 0;
+  const errors = [];
+
+  for (const row of rows) {
+    const regNo = String(row.reg_no || "").trim();
+    const name = String(row.student_name || "").trim();
+    const father = String(row.father_name || "").trim();
+    const cls = String(row.class || "").trim();
+    const mobile = String(row.mobile_no || "").trim();
+    let admDate = row.admission_date;
+    const admFee = Number(row.admission_fee) || 0;
+    const monFee = Number(row.monthly_fee) || 0;
+    const remark = row.remark ? String(row.remark).trim() : null;
+
+    if (!regNo || !name || !father || !mobile) {
+      fail++; errors.push(`${regNo || "(blank reg_no)"}: missing a required field`); continue;
+    }
+    if (!CLASS_OPTIONS.includes(cls)) {
+      fail++; errors.push(`${regNo}: invalid class "${cls}"`); continue;
+    }
+    if (admDate instanceof Date) admDate = admDate.toISOString().slice(0, 10);
+    if (!admDate) admDate = todayISO();
+
+    const existing = allStudents.find(s => s.reg_no === regNo);
+    const studentRecord = { reg_no: regNo, student_name: name, father_name: father, class: cls, mobile_no: mobile, admission_date: admDate };
+
+    try {
+      if (existing) {
+        const record = await withAuditStamp(studentRecord, { isNew: false });
+        const { error } = await supabaseClient.from("student_master").update(record).eq("reg_no", regNo);
+        if (error) throw error;
+        await logAudit("student_master", regNo, "update", existing, record);
+      } else {
+        const record = await withAuditStamp(studentRecord, { isNew: true });
+        const { error } = await supabaseClient.from("student_master").insert(record);
+        if (error) throw error;
+        await logAudit("student_master", regNo, "insert", null, record);
+      }
+      const feeRecord = await withAuditStamp({ reg_no: regNo, admission_fee: admFee, monthly_fee: monFee, remark }, { isNew: true });
+      const { data: feeData, error: feeErr } = await supabaseClient.from("fee_master").insert(feeRecord).select().single();
+      if (feeErr) throw feeErr;
+      await logAudit("fee_master", feeData.fee_id, "insert", null, feeRecord);
+      ok++;
+    } catch (err) {
+      fail++; errors.push(`${regNo}: ${err.message}`);
+    }
+  }
+
+  statusEl.innerHTML = `<p>${ok} row(s) saved, ${fail} failed.</p>` +
+    (errors.length ? `<div class="field-error show">${errors.map(escapeHtml).join("<br>")}</div>` : "");
+  btn.disabled = false; btn.textContent = "Upload";
+  showToast(`Bulk upload done: ${ok} saved, ${fail} failed.`, fail ? "error" : "success");
+  await loadList();
+}
+
+init();
+</script>
+</body>
+</html>
