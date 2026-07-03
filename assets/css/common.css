@@ -1,0 +1,230 @@
+/* ============================================================================
+   COMMON.CSS — universal style shared by EVERY page in the app.
+   Design language: "Academic Ledger" — deep ink-navy + brass/gold accent,
+   serif display type for headings, clean sans body, quiet paper background.
+   Every module page must link this file so the whole app looks identical.
+   ============================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---- palette ---- */
+  --ink:         #16233F;   /* primary — deep navy */
+  --ink-2:       #223357;   /* lighter navy, hovers/gradients */
+  --brass:       #C79A3D;   /* accent — brass/gold, used sparingly */
+  --brass-dark:  #A97F2C;
+  --paper:       #F6F4EF;   /* app background */
+  --paper-2:     #FFFFFF;   /* card/surface background */
+  --line:        #E4E0D6;   /* hairline borders */
+  --ink-soft:    #5B6472;   /* secondary text */
+  --ink-faint:   #8B93A0;   /* tertiary text / placeholders */
+  --success:     #2F8F5B;
+  --success-bg:  #E7F4EC;
+  --danger:      #C0392B;
+  --danger-bg:   #FBEAE7;
+  --warning:     #B9790A;
+  --warning-bg:  #FBF0DC;
+  --focus:       #2E4374;
+
+  /* ---- type ---- */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ---- shape / motion ---- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --shadow-sm: 0 1px 2px rgba(22,35,63,0.06);
+  --shadow-md: 0 8px 24px rgba(22,35,63,0.10);
+  --shadow-lg: 0 20px 60px rgba(22,35,63,0.22);
+  --ease: cubic-bezier(.22,.9,.32,1);
+  --dur: 220ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+}
+p { margin: 0 0 12px; color: var(--ink-soft); line-height: 1.55; }
+a { color: var(--ink-2); }
+::selection { background: var(--brass); color: #fff; }
+
+/* ---- focus ring (accessibility) ---- */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---- layout helpers ---- */
+.page-wrap { max-width: 1080px; margin: 0 auto; padding: 20px 18px 64px; }
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.page-header .eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--brass-dark); font-weight: 600; margin-bottom: 4px; display: block; }
+.card {
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 20px;
+}
+.divider { height: 1px; background: var(--line); border: none; margin: 18px 0; }
+
+/* ---- buttons ---- */
+.btn {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: var(--radius-sm);
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), background var(--dur) var(--ease), opacity var(--dur) var(--ease);
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px) scale(.99); }
+.btn-primary { background: var(--ink); color: #fff; }
+.btn-primary:hover { background: var(--ink-2); box-shadow: var(--shadow-md); }
+.btn-accent { background: var(--brass); color: #241a05; }
+.btn-accent:hover { background: var(--brass-dark); box-shadow: var(--shadow-md); }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn-ghost:hover { background: #fff; border-color: var(--ink-faint); }
+.btn-danger { background: var(--danger-bg); color: var(--danger); }
+.btn-danger:hover { background: var(--danger); color: #fff; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; cursor: pointer;
+  color: var(--ink); transition: background var(--dur) var(--ease);
+}
+.icon-btn:hover { background: rgba(22,35,63,0.07); }
+
+/* ---- form elements ---- */
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.field .hint { font-size: 12px; color: var(--ink-faint); margin-top: 5px; }
+.input, select.input, textarea.input {
+  width: 100%; font-family: var(--font-body); font-size: 14px;
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.input:focus { border-color: var(--focus); box-shadow: 0 0 0 3px rgba(46,67,116,0.12); outline: none; }
+textarea.input { resize: vertical; min-height: 90px; }
+.input-error { border-color: var(--danger); }
+.field-error { color: var(--danger); font-size: 12px; margin-top: 5px; display: none; }
+.field-error.show { display: block; }
+
+/* password field with show/hide toggle */
+.pw-wrap { position: relative; }
+.pw-wrap .input { padding-right: 42px; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; color: var(--ink-faint);
+  font-size: 12px; font-weight: 600; padding: 6px 8px;
+}
+
+/* ---- badges / pills ---- */
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; }
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-warning { background: var(--warning-bg); color: var(--warning); }
+.badge-danger  { background: var(--danger-bg); color: var(--danger); }
+.badge-neutral { background: #EEEBE2; color: var(--ink-soft); }
+
+/* ---- table ---- */
+.table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--line); background: #fff; }
+table.data { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 520px; }
+table.data th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--ink-faint); font-weight: 700; padding: 12px 14px; border-bottom: 1px solid var(--line);
+  background: #FBFAF6; position: sticky; top: 0;
+}
+table.data td { padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--ink); vertical-align: middle; }
+table.data tbody tr { transition: background var(--dur) var(--ease); }
+table.data tbody tr:hover { background: #FBFAF6; }
+table.data tbody tr:last-child td { border-bottom: none; }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--ink-faint); }
+.empty-state .icon { font-size: 34px; margin-bottom: 10px; opacity: .6; }
+
+.skeleton { background: linear-gradient(90deg, #EDEAE0 25%, #F5F3EC 37%, #EDEAE0 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: 6px; }
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* ============================================================================
+   MODAL / POPUP SYSTEM — the ONLY way any page shows data entry forms or
+   detail/info views. Every page uses this exact markup + these exact classes
+   so all popups look and behave identically across the whole app.
+   ============================================================================ */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(16,22,38,0.52);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; z-index: 1000;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+.modal-overlay.open { opacity: 1; pointer-events: auto; }
+.modal-box {
+  background: var(--paper-2); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto;
+  transform: translateY(14px) scale(.97); opacity: 0;
+  transition: transform var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+.modal-overlay.open .modal-box { transform: translateY(0) scale(1); opacity: 1; }
+.modal-box.modal-wide { max-width: 720px; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 24px 4px; }
+.modal-head h3 { margin: 0; font-size: 20px; }
+.modal-head .modal-sub { font-size: 13px; color: var(--ink-faint); margin-top: 3px; }
+.modal-close { background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--ink-faint); padding: 6px; border-radius: 50%; }
+.modal-close:hover { background: rgba(22,35,63,0.07); color: var(--ink); }
+.modal-body { padding: 18px 24px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 4px 24px 22px; }
+
+/* toast notifications */
+.toast-stack { position: fixed; top: 18px; right: 18px; z-index: 1200; display: flex; flex-direction: column; gap: 10px; }
+.toast {
+  background: var(--ink); color: #fff; padding: 12px 16px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; box-shadow: var(--shadow-md);
+  display: flex; align-items: center; gap: 10px; min-width: 220px; max-width: 340px;
+  transform: translateX(120%); animation: toast-in var(--dur) var(--ease) forwards;
+}
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+@keyframes toast-in { to { transform: translateX(0); } }
+
+/* spinner */
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; animation: spin .7s linear infinite; }
+.spinner-dark { border: 2px solid rgba(22,35,63,.18); border-top-color: var(--ink); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* fade/slide-up utility for page content entrance */
+.enter-up { animation: enterUp .42s var(--ease) both; }
+@keyframes enterUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* responsive */
+@media (max-width: 640px) {
+  .page-wrap { padding: 14px 12px 48px; }
+  table.data th, table.data td { padding: 10px 10px; font-size: 13px; }
+  .modal-body, .modal-head, .modal-foot { padding-left: 16px; padding-right: 16px; }
+}
