@@ -16,6 +16,16 @@ const MENU_ITEMS = [
     limitedAccess: [],                            // can read/enter only
     order: 1
   },
+   {
+  id: "admission",
+  label: "Admission",
+  icon: "🎓",
+  file: "pages/admission.html",
+  group: "Academics",
+  fullAccess: ["admin"],            // can add, edit AND delete
+  limitedAccess: ["editor", "viewer"], // can only view + add new records
+  order: 6
+},
   {
     id: "manage-users",
     label: "Approve Users",
