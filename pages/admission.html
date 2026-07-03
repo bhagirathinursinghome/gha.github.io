@@ -19,7 +19,8 @@
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-ghost btn-sm" id="templateBtn">⬇️ Download Template</button>
       <button class="btn btn-ghost btn-sm" id="bulkBtn" style="display:none;">⬆️ Bulk Upload</button>
-      <button class="btn btn-primary" id="addBtn" style="display:none;">+ Admission</button>
+      <button class="btn btn-ghost" id="reAdmitBtn" style="display:none;">↩️ Re-Admit Student</button>
+      <button class="btn btn-primary" id="addBtn" style="display:none;">+ Admit New Student</button>
     </div>
   </div>
 
@@ -118,13 +119,16 @@ async function init() {
 
   // Admit New Student: full + limited access
   document.getElementById("addBtn").style.display = "inline-flex";
-  document.getElementById("addBtn").onclick = () => openAdmissionModal(null);
+  document.getElementById("addBtn").onclick = () => openNewAdmissionModal();
 
   // Download Template: full + limited access
   document.getElementById("templateBtn").onclick = downloadTemplate;
 
-  // Bulk Upload: full access only (see note at top of this script)
+  // Re-Admit Student + Bulk Upload: full access only (see note at top of this script)
   if (myAccess.level === "full") {
+    document.getElementById("reAdmitBtn").style.display = "inline-flex";
+    document.getElementById("reAdmitBtn").onclick = () => openReAdmitEntryModal(null);
+
     document.getElementById("bulkBtn").style.display = "inline-flex";
     document.getElementById("bulkBtn").onclick = openBulkUploadModal;
   }
@@ -188,7 +192,7 @@ function renderTable(filterText) {
       <td style="white-space:nowrap;">
         <button class="btn btn-ghost btn-sm" onclick="openFeeHistoryModal('${s.reg_no}')">Fee History</button>
         ${myAccess.level === "full" ? `
-          <button class="btn btn-ghost btn-sm" onclick="openReAdmitModal('${s.reg_no}')">Re-Admit</button>
+          <button class="btn btn-ghost btn-sm" onclick="openReAdmitEntryModal('${s.reg_no}')">Re-Admit</button>
           <button class="btn btn-ghost btn-sm" onclick="openEditDetailsModal('${s.reg_no}')">Edit</button>
           <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${s.reg_no}')">Delete</button>
         ` : ""}
@@ -197,45 +201,36 @@ function renderTable(filterText) {
   `).join("");
 }
 
-/* ---------------- Admit new / Re-admit ---------------- */
+/* ---------------- Admit New Student (full data-entry form) ---------------- */
 
-function openReAdmitModal(regNo) {
-  const existing = allStudents.find(s => s.reg_no === regNo);
-  if (!existing) { showToast("Student not found.", "error"); return; }
-  openAdmissionModal(existing);
-}
-
-function openAdmissionModal(existing) {
-  const isReadmit = !!existing;
+function openNewAdmissionModal() {
   openModal({
-    title: isReadmit ? `Re-Admit: ${escapeHtml(existing.student_name)}` : "Admit New Student",
-    subtitle: isReadmit
-      ? `Reg No ${escapeHtml(existing.reg_no)} — update details and enter the new fee`
-      : "Enter the new student's details",
+    title: "Admit New Student",
+    subtitle: "Enter the new student's details",
     wide: true,
     bodyHtml: `
       <div class="field">
         <label for="aRegNo">Reg No</label>
-        <input class="input" id="aRegNo" value="${isReadmit ? escapeHtml(existing.reg_no) : ""}" ${isReadmit ? "disabled" : ""} />
+        <input class="input" id="aRegNo" value="" />
         <div class="field-error" id="aRegNoErr">Reg no is required.</div>
       </div>
       <div class="field">
         <label for="aName">Student Name</label>
-        <input class="input" id="aName" value="${isReadmit ? escapeHtml(existing.student_name) : ""}" />
+        <input class="input" id="aName" value="" />
         <div class="field-error" id="aNameErr">Name is required.</div>
       </div>
       <div class="field">
         <label for="aFather">Father Name</label>
-        <input class="input" id="aFather" value="${isReadmit ? escapeHtml(existing.father_name) : ""}" />
+        <input class="input" id="aFather" value="" />
         <div class="field-error" id="aFatherErr">Father name is required.</div>
       </div>
       <div class="field">
         <label for="aClass">Class</label>
-        <select class="input" id="aClass">${classOptionsHtml(isReadmit ? existing.class : "")}</select>
+        <select class="input" id="aClass">${classOptionsHtml("")}</select>
       </div>
       <div class="field">
         <label for="aMobile">Mobile No</label>
-        <input class="input" id="aMobile" value="${isReadmit ? escapeHtml(existing.mobile_no) : ""}" />
+        <input class="input" id="aMobile" value="" />
         <div class="field-error" id="aMobileErr">Mobile no is required.</div>
       </div>
       <div class="field">
@@ -244,11 +239,11 @@ function openAdmissionModal(existing) {
       </div>
       <div class="field">
         <label for="aAdmFee">Admission Fee</label>
-        <input class="input" type="number" min="0" step="0.01" id="aAdmFee" value="${isReadmit && existing.fee ? existing.fee.admission_fee : "0"}" />
+        <input class="input" type="number" min="0" step="0.01" id="aAdmFee" value="0" />
       </div>
       <div class="field">
         <label for="aMonFee">Monthly Fee</label>
-        <input class="input" type="number" min="0" step="0.01" id="aMonFee" value="${isReadmit && existing.fee ? existing.fee.monthly_fee : "0"}" />
+        <input class="input" type="number" min="0" step="0.01" id="aMonFee" value="0" />
       </div>
       <div class="field">
         <label for="aRemark">Remark (optional)</label>
@@ -257,14 +252,13 @@ function openAdmissionModal(existing) {
     `,
     footHtml: `
       <button class="btn btn-ghost" data-close>Cancel</button>
-      <button class="btn btn-primary" id="saveAdmBtn">${isReadmit ? "Save Re-Admission" : "Admit Student"}</button>
+      <button class="btn btn-primary" id="saveAdmBtn">Admit Student</button>
     `,
-    onOpen: () => { document.getElementById("saveAdmBtn").onclick = () => saveAdmission(existing); }
+    onOpen: () => { document.getElementById("saveAdmBtn").onclick = saveNewAdmission; }
   });
 }
 
-async function saveAdmission(existing) {
-  const isReadmit = !!existing;
+async function saveNewAdmission() {
   const regNo = document.getElementById("aRegNo").value.trim();
   const name = document.getElementById("aName").value.trim();
   const father = document.getElementById("aFather").value.trim();
@@ -281,8 +275,8 @@ async function saveAdmission(existing) {
   setErr("aNameErr", !name); if (!name) ok = false;
   setErr("aFatherErr", !father); if (!father) ok = false;
   setErr("aMobileErr", !mobile); if (!mobile) ok = false;
-  if (!isReadmit && allStudents.some(s => s.reg_no === regNo)) {
-    showToast("A student with this Reg No already exists. Use Re-Admit instead.", "error");
+  if (regNo && allStudents.some(s => s.reg_no === regNo)) {
+    showToast("A student with this Reg No already exists. Use Re-Admit Student instead.", "error");
     ok = false;
   }
   if (!ok) return;
@@ -294,20 +288,11 @@ async function saveAdmission(existing) {
     reg_no: regNo, student_name: name, father_name: father,
     class: cls, mobile_no: mobile, admission_date: admDate
   };
+  const record = await withAuditStamp(studentRecord, { isNew: true });
+  const { data, error } = await supabaseClient.from("student_master").insert(record).select().single();
+  if (error) { showToast("Admission failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Admit Student"; return; }
+  await logAudit("student_master", data.reg_no, "insert", null, record);
 
-  if (isReadmit) {
-    const record = await withAuditStamp(studentRecord, { isNew: false });
-    const { error } = await supabaseClient.from("student_master").update(record).eq("reg_no", existing.reg_no);
-    if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Save Re-Admission"; return; }
-    await logAudit("student_master", existing.reg_no, "update", existing, record);
-  } else {
-    const record = await withAuditStamp(studentRecord, { isNew: true });
-    const { data, error } = await supabaseClient.from("student_master").insert(record).select().single();
-    if (error) { showToast("Admission failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Admit Student"; return; }
-    await logAudit("student_master", data.reg_no, "insert", null, record);
-  }
-
-  // Always append a new fee_master row (this is the admission / re-admission fee event)
   const feeRecord = await withAuditStamp(
     { reg_no: regNo, admission_fee: admFee, monthly_fee: monFee, remark },
     { isNew: true }
@@ -316,7 +301,125 @@ async function saveAdmission(existing) {
   if (feeErr) { showToast("Student saved, but the fee entry failed: " + feeErr.message, "error"); return; }
   await logAudit("fee_master", feeData.fee_id, "insert", null, feeRecord);
 
-  showToast(isReadmit ? "Student re-admitted." : "Student admitted.", "success");
+  showToast("Student admitted.", "success");
+  closeModal();
+  await loadList();
+}
+
+/* ---------------- Re-Admit Student (fetch by Reg No, then edit fee only) ---------------- */
+// Flow: user types a Reg No and clicks Fetch -> the student's saved details
+// are shown read-only -> user edits ONLY the admission fee / monthly fee
+// (and an optional remark) -> Submit updates admission_date on
+// student_master and appends a new fee_master row.
+// If you also want class/mobile/name editable at re-admission time (e.g.
+// promoting a student to the next class), use the row's "Edit" button
+// either before or after re-admitting — say the word and I can fold that
+// into this same form instead.
+
+function openReAdmitEntryModal(initialRegNo) {
+  openModal({
+    title: "Re-Admit Student",
+    subtitle: "Enter the student's Reg No to fetch their details",
+    wide: true,
+    bodyHtml: `
+      <div class="field" style="display:flex; gap:8px; align-items:flex-end;">
+        <div style="flex:1;">
+          <label for="raRegNo">Reg No</label>
+          <input class="input" id="raRegNo" placeholder="e.g. 2024/0001" />
+        </div>
+        <button class="btn btn-ghost" id="raFetchBtn" type="button">Fetch</button>
+      </div>
+      <div class="field-error" id="raRegNoErr">No student found with this Reg No.</div>
+      <div id="raResult"></div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>`,
+    onOpen: () => {
+      document.getElementById("raFetchBtn").onclick = fetchForReAdmission;
+      document.getElementById("raRegNo").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); fetchForReAdmission(); }
+      });
+      if (initialRegNo) {
+        document.getElementById("raRegNo").value = initialRegNo;
+        document.getElementById("raRegNo").disabled = true;
+        fetchForReAdmission();
+      }
+    }
+  });
+}
+
+async function fetchForReAdmission() {
+  const regNo = document.getElementById("raRegNo").value.trim();
+  const errEl = document.getElementById("raRegNoErr");
+  const resultEl = document.getElementById("raResult");
+  errEl.classList.remove("show");
+  resultEl.innerHTML = "";
+
+  if (!regNo) { errEl.textContent = "Enter a Reg No first."; errEl.classList.add("show"); return; }
+
+  let student = allStudents.find(s => s.reg_no === regNo);
+  if (!student) {
+    const { data, error } = await supabaseClient.from("student_master").select("*").eq("reg_no", regNo).maybeSingle();
+    if (error || !data) { errEl.textContent = "No student found with this Reg No."; errEl.classList.add("show"); return; }
+    const { data: feeData } = await supabaseClient.from("current_fee_master").select("*").eq("reg_no", regNo).maybeSingle();
+    student = { ...data, fee: feeData || null };
+  }
+  renderReAdmissionForm(student);
+}
+
+function renderReAdmissionForm(student) {
+  const resultEl = document.getElementById("raResult");
+  resultEl.innerHTML = `
+    <div class="card" style="margin-top:12px;">
+      <p><strong>${escapeHtml(student.student_name)}</strong> — ${escapeHtml(student.father_name)}</p>
+      <p><span class="badge badge-neutral">${classLabel(student.class)}</span> &nbsp; ${escapeHtml(student.mobile_no)}</p>
+      <p style="opacity:.7; font-size:.9em;">Currently admitted since: ${escapeHtml(student.admission_date)}</p>
+    </div>
+    <div class="field">
+      <label for="raDate">Re-Admission Date</label>
+      <input class="input" type="date" id="raDate" value="${todayISO()}" />
+    </div>
+    <div class="field">
+      <label for="raAdmFee">Admission Fee</label>
+      <input class="input" type="number" min="0" step="0.01" id="raAdmFee" value="${student.fee ? student.fee.admission_fee : 0}" />
+    </div>
+    <div class="field">
+      <label for="raMonFee">Monthly Fee</label>
+      <input class="input" type="number" min="0" step="0.01" id="raMonFee" value="${student.fee ? student.fee.monthly_fee : 0}" />
+    </div>
+    <div class="field">
+      <label for="raRemark">Remark (optional)</label>
+      <input class="input" id="raRemark" value="" />
+    </div>
+    <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+      <button class="btn btn-primary" id="raSubmitBtn">Submit Re-Admission</button>
+    </div>
+  `;
+  document.getElementById("raSubmitBtn").onclick = () => submitReAdmission(student);
+}
+
+async function submitReAdmission(student) {
+  const btn = document.getElementById("raSubmitBtn");
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  const admission_date = document.getElementById("raDate").value || todayISO();
+  const admission_fee = Number(document.getElementById("raAdmFee").value) || 0;
+  const monthly_fee = Number(document.getElementById("raMonFee").value) || 0;
+  const remark = document.getElementById("raRemark").value.trim() || null;
+
+  const studentRecord = await withAuditStamp({ admission_date }, { isNew: false });
+  const { error } = await supabaseClient.from("student_master").update(studentRecord).eq("reg_no", student.reg_no);
+  if (error) { showToast("Re-admission failed: " + error.message, "error"); btn.disabled = false; btn.textContent = "Submit Re-Admission"; return; }
+  await logAudit("student_master", student.reg_no, "update", student, studentRecord);
+
+  const feeRecord = await withAuditStamp(
+    { reg_no: student.reg_no, admission_fee, monthly_fee, remark },
+    { isNew: true }
+  );
+  const { data: feeData, error: feeErr } = await supabaseClient.from("fee_master").insert(feeRecord).select().single();
+  if (feeErr) { showToast("Admission date updated, but the fee entry failed: " + feeErr.message, "error"); return; }
+  await logAudit("fee_master", feeData.fee_id, "insert", null, feeRecord);
+
+  showToast("Student re-admitted.", "success");
   closeModal();
   await loadList();
 }
