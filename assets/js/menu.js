@@ -1,6 +1,6 @@
 /* ============================================================================
    MENU.JS — the single source of truth for the hamburger menu.
-   Add a new object here for every new page. The main frame reads this file
+   Add a new object here for every new page . The main frame reads this file
    to build the menu AND to enforce which roles may open which page.
    See HOW_TO_ADD_PAGE.md for the full explanation of every field.
    ============================================================================ */
