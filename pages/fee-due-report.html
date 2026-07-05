@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fee Due & Reports — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  .fr-tabs { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
+  .fr-tab-btn { padding: 8px 16px; border-radius: var(--radius-md,8px); border: 1px solid var(--ink,#ccc);
+                background: transparent; cursor: pointer; font-weight: 600; }
+  .fr-tab-btn.active { background: var(--brass,#b08d57); color: #fff; border-color: transparent; }
+  .fr-panel { display: none; } .fr-panel.show { display: block; }
+  .fr-filter-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+  .fr-filter-row .field { min-width: 180px; margin-bottom: 0; }
+  .fr-cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+  .fr-card { padding: 12px 18px; border-radius: var(--radius-md,8px); background: rgba(0,0,0,.04); min-width: 150px; }
+  .fr-card .label { font-size: .78em; opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
+  .fr-card .value { font-size: 1.3em; font-weight: 700; }
+  .fr-card.warn .value { color: var(--danger,#c0392b); }
+  .fr-card.ok .value { color: var(--success,#2e7d32); }
+  .month-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 8px; margin: 14px 0; }
+  .mchip { padding: 10px 8px; border-radius: var(--radius-md,8px); text-align: center; font-size: .85em; }
+  .mchip .m { font-weight: 700; display: block; margin-bottom: 4px; }
+  .mchip.paid { background: #e3f5e6; color: #1e7d32; border: 1px solid #b7e2bd; }
+  .mchip.due { background: #fbe4e2; color: #b3261e; border: 1px solid #f2b8b4; }
+  .mchip.partial { background: #fff1da; color: #a15c00; border: 1px solid #ffdca3; }
+  .mchip.inactive { background: #f5f5f5; color: #b3b3b3; border: 1px dashed #ddd; }
+  .fr-pick-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .fr-pick-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px;
+                  border: 1px solid var(--ink,#ddd); border-radius: var(--radius-md,8px); }
+  .fr-student-card { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:14px 16px;
+                      border-radius: var(--radius-md,8px); background: rgba(176,141,87,.08);
+                      border: 1px solid rgba(176,141,87,.35); margin: 16px 0; }
+  td.num, th.num { text-align: right; }
+</style>
+</head>
+<body>
+  <div class="page-wrap enter-up">
+    <div class="page-header">
+      <span class="eyebrow">Accounts</span>
+      <h1>Fee Due &amp; Reports</h1>
+      <p>Check individual dues, or view class-wise, month-wise, and date-range collection reports.</p>
+    </div>
+
+    <div class="fr-tabs">
+      <button class="fr-tab-btn active" data-tab="student">🧑‍🎓 Student</button>
+      <button class="fr-tab-btn" data-tab="classwise">🏫 Class-wise</button>
+      <button class="fr-tab-btn" data-tab="monthwise">📅 Month-wise</button>
+      <button class="fr-tab-btn" data-tab="daterange">📆 Date Range</button>
+    </div>
+
+    <!-- STUDENT -->
+    <section id="tab-student" class="fr-panel show card">
+      <h3>Student Due &amp; Receipts</h3>
+      <div class="fr-filter-row">
+        <div class="field"><label for="sSearch">Reg No / Name / Mobile No</label>
+          <input class="input" id="sSearch" placeholder="Type to search..." /></div>
+        <button class="btn btn-primary" id="sSearchBtn">Search</button>
+      </div>
+      <div id="sPickArea"></div>
+      <div id="sResultArea"></div>
+    </section>
+
+    <!-- CLASS-WISE -->
+    <section id="tab-classwise" class="fr-panel card">
+      <h3>Class-wise Due &amp; Collection</h3>
+      <div class="fr-filter-row">
+        <div class="field"><label for="cClass">Class</label>
+          <select class="input" id="cClass"><option value="">All classes</option></select></div>
+        <div class="field" style="display:flex; align-items:center; gap:8px; min-width:auto;">
+          <input type="checkbox" id="cIncludeInactive" style="width:auto;" />
+          <label for="cIncludeInactive" style="margin:0;">Include deactivated students</label>
+        </div>
+        <button class="btn btn-primary" id="cGenBtn">Generate</button>
+      </div>
+      <div id="cResultArea"></div>
+    </section>
+
+    <!-- MONTH-WISE -->
+    <section id="tab-monthwise" class="fr-panel card">
+      <h3>Month-wise Due &amp; Collection</h3>
+      <div class="fr-filter-row">
+        <div class="field"><label for="mMonth">Month</label>
+          <input class="input" type="month" id="mMonth" /></div>
+        <button class="btn btn-primary" id="mGenBtn">Generate</button>
+      </div>
+      <div id="mResultArea"></div>
+    </section>
+
+    <!-- DATE RANGE -->
+    <section id="tab-daterange" class="fr-panel card">
+      <h3>Date Range Collection Report</h3>
+      <div class="fr-filter-row">
+        <div class="field"><label for="dStart">From</label><input class="input" type="date" id="dStart" /></div>
+        <div class="field"><label for="dEnd">To</label><input class="input" type="date" id="dEnd" /></div>
+        <div class="field"><label for="dType">Fee Type</label>
+          <select class="input" id="dType">
+            <option value="">All types</option>
+            <option value="monthly">Monthly</option>
+            <option value="admission_readmission">Admission/Readmission</option>
+            <option value="other">Other</option>
+          </select></div>
+        <div class="field"><label for="dClass">Class</label>
+          <select class="input" id="dClass"><option value="">All classes</option></select></div>
+        <button class="btn btn-primary" id="dGenBtn">Generate</button>
+        <button class="btn btn-ghost" id="dExportBtn">⬇ Export Excel</button>
+      </div>
+      <div id="dResultArea"></div>
+    </section>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "fee-due-report"; // must match menu.js id
+let myAccess = null;
+let lastDateRangeRows = []; // for export
+
+const CLASS_LABELS = {
+  "4":"Class 4","5":"Class 5","6":"Class 6","7":"Class 7","8":"Class 8",
+  "9":"Class 9","10":"Class 10","11-arts":"Class 11 - Arts","11-science":"Class 11 - Science",
+  "12-arts":"Class 12 - Arts","12-science":"Class 12 - Science"
+};
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+/* =====================================================================
+   DUE-CALCULATION ENGINE (same logic as pages/fee-collection.html —
+   kept duplicated on purpose since pages here are standalone modules)
+   ===================================================================== */
+function ymKey(y,m){ return `${y}-${String(m).padStart(2,"0")}`; }
+function addMonth(y,m){ m++; if (m>12){ m=1; y++; } return {y,m}; }
+function monthsBetweenInclusive(y1,m1,y2,m2){
+  const out = []; let y=y1, m=m1, guard=0;
+  while ((y<y2 || (y===y2 && m<=m2)) && guard<600) {
+    out.push({y,m});
+    const n = addMonth(y,m); y=n.y; m=n.m; guard++;
+  }
+  return out;
+}
+function getAcademicWindow(klass, today){
+  const year = today.getFullYear();
+  if (["4","5","6","7","8","9"].includes(klass)) return monthsBetweenInclusive(year,1,year,12);
+  if (klass === "10") return monthsBetweenInclusive(year,1,year,3);
+  const ayStartYear = (today.getMonth()+1) >= 4 ? year : year-1;
+  return monthsBetweenInclusive(ayStartYear,4, ayStartYear+1,3);
+}
+function getMonthlyRate(y,m, monthlyRatesSorted){
+  const monthEnd = new Date(y, m, 0, 23,59,59);
+  let rate = monthlyRatesSorted.length ? Number(monthlyRatesSorted[0].amount) : 0;
+  for (const r of monthlyRatesSorted) {
+    if (new Date(r.recorded_at) <= monthEnd) rate = Number(r.amount); else break;
+  }
+  return rate;
+}
+function computeMonthlyLedger(student, monthlyRates, monthlyReceipts, today){
+  const monthlyRatesSorted = [...monthlyRates].sort((a,b)=> new Date(a.recorded_at)-new Date(b.recorded_at));
+  const start = new Date(student.reactivated_at || student.admission_date);
+  const end = (student.status === "deactivated" && student.deactivate_date) ? new Date(student.deactivate_date) : today;
+
+  const allMonths = monthsBetweenInclusive(start.getFullYear(), start.getMonth()+1, end.getFullYear(), end.getMonth()+1);
+  let pool = monthlyReceipts.reduce((s,r)=> s + Number(r.amount_cash)+Number(r.amount_bank)+Number(r.amount_phonepe)+Number(r.discount), 0);
+
+  const ledger = {}; let totalDue = 0;
+  for (const {y,m} of allMonths) {
+    const rate = getMonthlyRate(y,m,monthlyRatesSorted);
+    let status, due;
+    if (pool >= rate) { status="paid"; due=0; pool -= rate; }
+    else if (pool > 0) { status="partial"; due = rate-pool; pool=0; }
+    else { status="due"; due = rate; }
+    ledger[ymKey(y,m)] = { y,m,rate,status,due };
+    totalDue += due;
+  }
+
+  // Displayed months = the class's nominal session window UNIONED with
+  // every month the student has actually been active for, so a month
+  // with real due never gets dropped off the grid just because it falls
+  // outside the nominal window (e.g. a Class 10 student still active
+  // past March). Months before admission/reactivation and months after
+  // today/deactivation are both simply "inactive".
+  const nominal = getAcademicWindow(student.class, today);
+  const seen = new Set(); const merged = [];
+  [...nominal, ...allMonths].forEach(({y,m}) => {
+    const k = ymKey(y,m);
+    if (!seen.has(k)) { seen.add(k); merged.push({y,m,key:k}); }
+  });
+  merged.sort((a,b)=> a.y-b.y || a.m-b.m);
+
+  const windowMonths = merged.map(({y,m,key}) => {
+    const beforeStart = (y < start.getFullYear()) || (y===start.getFullYear() && m < start.getMonth()+1);
+    const afterEnd = (y > end.getFullYear()) || (y===end.getFullYear() && m > end.getMonth()+1);
+    if (beforeStart || afterEnd) return { y,m,key,label:`${MONTH_NAMES[m-1]} ${y}`, status:"inactive", due:0 };
+    const l = ledger[key];
+    return { y,m,key,label:`${MONTH_NAMES[m-1]} ${y}`, status:l.status, due:l.due };
+  });
+
+  const dueMonths = allMonths.map(({y,m})=>({ y,m,key:ymKey(y,m), ...ledger[ymKey(y,m)] }))
+    .filter(mo => mo.status==="due" || mo.status==="partial");
+
+  return { windowMonths, totalDue, ledgerByKey: ledger, dueMonths, start, end };
+}
+function computeAdmissionLedger(feeMasterRows, receipts){
+  const charged = feeMasterRows.filter(r=>r.type==="admission"||r.type==="readmission")
+    .reduce((s,r)=>s+Number(r.amount),0);
+  const paid = receipts.reduce((s,r)=> s+Number(r.amount_cash)+Number(r.amount_bank)+Number(r.amount_phonepe)+Number(r.discount),0);
+  return { charged, paid, due: Math.max(0, charged-paid) };
+}
+function money(n){ return "₹" + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+function receiptTotal(r){ return Number(r.amount_cash)+Number(r.amount_bank)+Number(r.amount_phonepe)+Number(r.discount); }
+
+/* =====================================================================
+   INIT
+   ===================================================================== */
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  const classOptions = Object.entries(CLASS_LABELS).map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+  document.getElementById("cClass").insertAdjacentHTML("beforeend", classOptions);
+  document.getElementById("dClass").insertAdjacentHTML("beforeend", classOptions);
+  document.getElementById("mMonth").value = new Date().toISOString().slice(0,7);
+  const today = new Date();
+  document.getElementById("dStart").value = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0,10);
+  document.getElementById("dEnd").value = today.toISOString().slice(0,10);
+
+  document.querySelectorAll(".fr-tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".fr-tab-btn").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll(".fr-panel").forEach(p=>p.classList.remove("show"));
+      btn.classList.add("active");
+      document.getElementById("tab-"+btn.dataset.tab).classList.add("show");
+    });
+  });
+
+  document.getElementById("sSearchBtn").addEventListener("click", studentSearch);
+  document.getElementById("sSearch").addEventListener("keydown", e=>{ if(e.key==="Enter") studentSearch(); });
+  document.getElementById("cGenBtn").addEventListener("click", generateClasswise);
+  document.getElementById("mGenBtn").addEventListener("click", generateMonthwise);
+  document.getElementById("dGenBtn").addEventListener("click", generateDateRange);
+  document.getElementById("dExportBtn").addEventListener("click", exportDateRange);
+}
+
+/* =====================================================================
+   STUDENT TAB
+   ===================================================================== */
+async function studentSearch() {
+  const term = document.getElementById("sSearch").value.trim();
+  const pickArea = document.getElementById("sPickArea");
+  pickArea.innerHTML = "";
+  if (!term) { showToast("Type something to search.", "error"); return; }
+
+  const { data, error } = await supabaseClient.from("student_master").select("*")
+    .or(`reg_no.ilike.%${term}%,name.ilike.%${term}%,mobile_no.ilike.%${term}%`).limit(20);
+  if (error) { showToast("Search failed: " + error.message, "error"); return; }
+  if (!data || data.length === 0) { showToast("No student found.", "error"); return; }
+  if (data.length === 1) { await showStudentReport(data[0]); return; }
+
+  pickArea.innerHTML = `<p style="margin-top:10px;">${data.length} matches — pick one:</p>
+    <div class="fr-pick-list">${data.map(s=>`
+      <div class="fr-pick-item">
+        <span>${escapeHtml(s.name)} — ${escapeHtml(s.reg_no)} — ${escapeHtml(CLASS_LABELS[s.class]||s.class)} — ${escapeHtml(s.mobile_no)}</span>
+        <button class="btn btn-ghost btn-sm" data-reg="${escapeHtml(s.reg_no)}">Select</button>
+      </div>`).join("")}</div>`;
+  pickArea.querySelectorAll("button[data-reg]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const s = data.find(x=>x.reg_no===btn.dataset.reg);
+      await showStudentReport(s);
+    });
+  });
+}
+
+async function showStudentReport(student) {
+  document.getElementById("sPickArea").innerHTML = "";
+  const resultArea = document.getElementById("sResultArea");
+  resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
+
+  const [{ data: feeMaster }, { data: receipts }, { data: categories }] = await Promise.all([
+    supabaseClient.from("fee_master").select("*").eq("student_reg_no", student.reg_no),
+    supabaseClient.from("fee_receipts").select("*").eq("student_reg_no", student.reg_no).order("recorded_at", { ascending: false }),
+    supabaseClient.from("fee_categories").select("*")
+  ]);
+
+  const monthlyRates = (feeMaster||[]).filter(r=>r.type==="monthly");
+  const monthlyReceipts = (receipts||[]).filter(r=>r.fee_type==="monthly");
+  const admissionReceipts = (receipts||[]).filter(r=>r.fee_type==="admission_readmission");
+  const otherReceipts = (receipts||[]).filter(r=>r.fee_type==="other");
+
+  const today = new Date();
+  const mLed = computeMonthlyLedger(student, monthlyRates, monthlyReceipts, today);
+  const aLed = computeAdmissionLedger(feeMaster||[], admissionReceipts);
+  const otherTotal = otherReceipts.reduce((s,r)=>s+receiptTotal(r),0);
+
+  resultArea.innerHTML = `
+    <div class="fr-student-card">
+      <div><b>${escapeHtml(student.name)}</b> (${escapeHtml(student.reg_no)}) — ${escapeHtml(CLASS_LABELS[student.class]||student.class)}<br/>
+      Father: ${escapeHtml(student.father_name)} • Mobile: ${escapeHtml(student.mobile_no)}</div>
+      <div>${statusBadge(student.status)}</div>
+    </div>
+
+    <div class="fr-cards">
+      <div class="fr-card ${mLed.totalDue>0?'warn':'ok'}"><div class="label">Monthly Due</div><div class="value">${money(mLed.totalDue)}</div></div>
+      <div class="fr-card ${aLed.due>0?'warn':'ok'}"><div class="label">Admission/Readm. Due</div><div class="value">${money(aLed.due)}</div></div>
+      <div class="fr-card"><div class="label">Other Fee Received</div><div class="value">${money(otherTotal)}</div></div>
+      <div class="fr-card warn"><div class="label">Total Due (all)</div><div class="value">${money(mLed.totalDue+aLed.due)}</div></div>
+    </div>
+
+    <h4>Monthly Fee — ${CLASS_LABELS[student.class]||student.class} session</h4>
+    <div class="month-grid">${mLed.windowMonths.map(mo=>`
+      <div class="mchip ${mo.status}"><span class="m">${mo.label}</span>
+        ${mo.status==="paid"?"Paid":mo.status==="inactive"?"Inactive":money(mo.due)+" due"}</div>`).join("")}</div>
+
+    <h4>All Payment History</h4>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Date</th><th>Type</th><th>Detail</th><th class="num">Cash</th><th class="num">Bank</th><th class="num">PhonePe</th><th class="num">Discount</th><th>Remark</th></tr></thead>
+      <tbody>${(receipts||[]).length ? receipts.map(r=>{
+        const detail = r.fee_type==="monthly" ? (r.for_months||[]).join(", ")
+          : r.fee_type==="other" ? (categories.find(c=>c.category_id===r.category_id)?.name || "—")
+          : "—";
+        return `<tr><td>${formatDateTime(r.recorded_at)}</td>
+          <td>${r.fee_type==="admission_readmission"?"Admission/Readm.":r.fee_type[0].toUpperCase()+r.fee_type.slice(1)}</td>
+          <td>${escapeHtml(detail)}</td>
+          <td class="num">${money(r.amount_cash)}</td><td class="num">${money(r.amount_bank)}</td>
+          <td class="num">${money(r.amount_phonepe)}</td><td class="num">${money(r.discount)}</td>
+          <td>${escapeHtml(r.remark||"")}</td></tr>`;
+      }).join("") : `<tr><td colspan="8">No payments recorded yet.</td></tr>`}</tbody>
+    </table></div>
+  `;
+}
+
+/* =====================================================================
+   CLASS-WISE TAB
+   ===================================================================== */
+async function generateClasswise() {
+  const klass = document.getElementById("cClass").value;
+  const includeInactive = document.getElementById("cIncludeInactive").checked;
+  const resultArea = document.getElementById("cResultArea");
+  resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
+
+  let q = supabaseClient.from("student_master").select("*");
+  if (klass) q = q.eq("class", klass);
+  if (!includeInactive) q = q.eq("status", "active");
+  const { data: students, error } = await q;
+  if (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
+  if (!students || students.length === 0) { resultArea.innerHTML = `<div class="empty-state"><p>No students match.</p></div>`; return; }
+
+  const regNos = students.map(s=>s.reg_no);
+  const [{ data: feeMaster }, { data: receipts }] = await Promise.all([
+    supabaseClient.from("fee_master").select("*").in("student_reg_no", regNos),
+    supabaseClient.from("fee_receipts").select("*").in("student_reg_no", regNos)
+  ]);
+
+  const today = new Date();
+  let sumMonthlyDue=0, sumAdmDue=0, sumReceived=0;
+  const rows = students.map(s => {
+    const fm = (feeMaster||[]).filter(r=>r.student_reg_no===s.reg_no);
+    const rc = (receipts||[]).filter(r=>r.student_reg_no===s.reg_no);
+    const monthlyRates = fm.filter(r=>r.type==="monthly");
+    const monthlyReceipts = rc.filter(r=>r.fee_type==="monthly");
+    const admReceipts = rc.filter(r=>r.fee_type==="admission_readmission");
+    const mLed = computeMonthlyLedger(s, monthlyRates, monthlyReceipts, today);
+    const aLed = computeAdmissionLedger(fm, admReceipts);
+    const received = rc.reduce((sum,r)=>sum+receiptTotal(r),0);
+    sumMonthlyDue += mLed.totalDue; sumAdmDue += aLed.due; sumReceived += received;
+    return { s, monthlyDue: mLed.totalDue, admDue: aLed.due, received };
+  });
+
+  resultArea.innerHTML = `
+    <div class="fr-cards">
+      <div class="fr-card"><div class="label">Students</div><div class="value">${students.length}</div></div>
+      <div class="fr-card warn"><div class="label">Total Monthly Due</div><div class="value">${money(sumMonthlyDue)}</div></div>
+      <div class="fr-card warn"><div class="label">Total Admission Due</div><div class="value">${money(sumAdmDue)}</div></div>
+      <div class="fr-card ok"><div class="label">Total Received (all-time)</div><div class="value">${money(sumReceived)}</div></div>
+    </div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Reg No</th><th>Name</th><th>Class</th><th>Status</th>
+        <th class="num">Monthly Due</th><th class="num">Admission Due</th><th class="num">Total Due</th><th class="num">Received</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>${escapeHtml(r.s.reg_no)}</td><td>${escapeHtml(r.s.name)}</td>
+        <td>${escapeHtml(CLASS_LABELS[r.s.class]||r.s.class)}</td><td>${statusBadge(r.s.status)}</td>
+        <td class="num">${money(r.monthlyDue)}</td><td class="num">${money(r.admDue)}</td>
+        <td class="num">${money(r.monthlyDue+r.admDue)}</td><td class="num">${money(r.received)}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+  `;
+}
+
+/* =====================================================================
+   MONTH-WISE TAB
+   ===================================================================== */
+async function generateMonthwise() {
+  const val = document.getElementById("mMonth").value; // "YYYY-MM"
+  if (!val) { showToast("Pick a month.", "error"); return; }
+  const [yy, mm] = val.split("-").map(Number);
+  const resultArea = document.getElementById("mResultArea");
+  resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
+
+  const { data: students, error } = await supabaseClient.from("student_master").select("*");
+  if (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
+
+  const regNos = students.map(s=>s.reg_no);
+  const [{ data: feeMaster }, { data: receipts }] = await Promise.all([
+    supabaseClient.from("fee_master").select("*").in("student_reg_no", regNos),
+    supabaseClient.from("fee_receipts").select("*").in("student_reg_no", regNos)
+  ]);
+
+  const today = new Date();
+  const key = ymKey(yy,mm);
+  const dueRows = [];
+  let totalDueThisMonth = 0, totalPaidThisMonth = 0;
+
+  for (const s of students) {
+    const fm = (feeMaster||[]).filter(r=>r.student_reg_no===s.reg_no);
+    const monthlyRates = fm.filter(r=>r.type==="monthly");
+    const monthlyReceipts = (receipts||[]).filter(r=>r.student_reg_no===s.reg_no && r.fee_type==="monthly");
+    const mLed = computeMonthlyLedger(s, monthlyRates, monthlyReceipts, today);
+    const entry = mLed.ledgerByKey[key];
+    if (!entry) continue; // month not in this student's active range at all -> not applicable, skip from table
+    dueRows.push({ s, status: entry.status, due: entry.due, rate: entry.rate });
+    if (entry.status === "due" || entry.status === "partial") totalDueThisMonth += entry.due;
+    if (entry.status === "paid") totalPaidThisMonth += entry.rate;
+    if (entry.status === "partial") totalPaidThisMonth += (entry.rate - entry.due);
+  }
+
+  // Collections actually recorded during this calendar month (any fee type)
+  const monthStart = new Date(yy, mm-1, 1);
+  const monthEnd = new Date(yy, mm, 0, 23,59,59);
+  const collected = (receipts||[]).filter(r=>{
+    const d = new Date(r.recorded_at);
+    return d >= monthStart && d <= monthEnd;
+  });
+  const byType = { monthly:0, admission_readmission:0, other:0 };
+  let cashSum=0, bankSum=0, phonepeSum=0, discountSum=0;
+  collected.forEach(r=>{
+    byType[r.fee_type] += receiptTotal(r);
+    cashSum += Number(r.amount_cash); bankSum += Number(r.amount_bank);
+    phonepeSum += Number(r.amount_phonepe); discountSum += Number(r.discount);
+  });
+  const grandCollected = cashSum+bankSum+phonepeSum+discountSum;
+
+  resultArea.innerHTML = `
+    <h4>Due Status for ${MONTH_NAMES[mm-1]} ${yy}</h4>
+    <div class="fr-cards">
+      <div class="fr-card warn"><div class="label">Due this month</div><div class="value">${money(totalDueThisMonth)}</div></div>
+      <div class="fr-card ok"><div class="label">Paid for this month</div><div class="value">${money(totalPaidThisMonth)}</div></div>
+    </div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Reg No</th><th>Name</th><th>Class</th><th>Status</th><th class="num">Amount Due</th></tr></thead>
+      <tbody>${dueRows.length ? dueRows.map(r=>`<tr>
+        <td>${escapeHtml(r.s.reg_no)}</td><td>${escapeHtml(r.s.name)}</td>
+        <td>${escapeHtml(CLASS_LABELS[r.s.class]||r.s.class)}</td>
+        <td>${r.status==="paid"?'<span class="badge badge-success">Paid</span>':
+             r.status==="partial"?'<span class="badge badge-warning">Partial</span>':
+             '<span class="badge badge-danger">Due</span>'}</td>
+        <td class="num">${r.status==="paid"?"—":money(r.due)}</td>
+      </tr>`).join("") : `<tr><td colspan="5">No students had a monthly fee applicable this month.</td></tr>`}</tbody>
+    </table></div>
+
+    <h4 style="margin-top:24px;">Amount Collected During ${MONTH_NAMES[mm-1]} ${yy}</h4>
+    <div class="fr-cards">
+      <div class="fr-card"><div class="label">Monthly</div><div class="value">${money(byType.monthly)}</div></div>
+      <div class="fr-card"><div class="label">Admission/Readm.</div><div class="value">${money(byType.admission_readmission)}</div></div>
+      <div class="fr-card"><div class="label">Other</div><div class="value">${money(byType.other)}</div></div>
+      <div class="fr-card ok"><div class="label">Total Collected</div><div class="value">${money(grandCollected)}</div></div>
+    </div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th></tr></thead>
+      <tbody><tr><td class="num">${money(cashSum)}</td><td class="num">${money(bankSum)}</td>
+        <td class="num">${money(phonepeSum)}</td><td class="num">${money(discountSum)}</td></tr></tbody>
+    </table></div>
+  `;
+}
+
+/* =====================================================================
+   DATE RANGE TAB
+   ===================================================================== */
+async function generateDateRange() {
+  const start = document.getElementById("dStart").value;
+  const end = document.getElementById("dEnd").value;
+  const feeType = document.getElementById("dType").value;
+  const klass = document.getElementById("dClass").value;
+  const resultArea = document.getElementById("dResultArea");
+  if (!start || !end) { showToast("Pick both dates.", "error"); return; }
+  resultArea.innerHTML = `<div class="skeleton" style="height:18px"></div>`;
+
+  const startIso = new Date(start+"T00:00:00").toISOString();
+  const endIso = new Date(end+"T23:59:59").toISOString();
+
+  let q = supabaseClient.from("fee_receipts").select("*, student_master(name, class)")
+    .gte("recorded_at", startIso).lte("recorded_at", endIso).order("recorded_at", { ascending: false });
+  if (feeType) q = q.eq("fee_type", feeType);
+  const { data, error } = await q;
+  if (error) { resultArea.innerHTML = `<div class="field-error show">${escapeHtml(error.message)}</div>`; return; }
+
+  let rows = data || [];
+  if (klass) rows = rows.filter(r => r.student_master && r.student_master.class === klass);
+
+  const { data: categories } = await supabaseClient.from("fee_categories").select("*");
+  lastDateRangeRows = rows.map(r => ({
+    ...r,
+    student_name: r.student_master ? r.student_master.name : "",
+    student_class: r.student_master ? r.student_master.class : "",
+    category_name: r.fee_type==="other" ? (categories.find(c=>c.category_id===r.category_id)?.name || "") : ""
+  }));
+
+  const totals = lastDateRangeRows.reduce((acc,r)=>{
+    acc.cash += Number(r.amount_cash); acc.bank += Number(r.amount_bank);
+    acc.phonepe += Number(r.amount_phonepe); acc.discount += Number(r.discount);
+    return acc;
+  }, { cash:0, bank:0, phonepe:0, discount:0 });
+  const grand = totals.cash+totals.bank+totals.phonepe+totals.discount;
+
+  resultArea.innerHTML = `
+    <div class="fr-cards">
+      <div class="fr-card"><div class="label">Receipts</div><div class="value">${lastDateRangeRows.length}</div></div>
+      <div class="fr-card ok"><div class="label">Total Collected</div><div class="value">${money(grand)}</div></div>
+      <div class="fr-card"><div class="label">Cash / Bank / PhonePe</div><div class="value" style="font-size:.95em;">${money(totals.cash)} / ${money(totals.bank)} / ${money(totals.phonepe)}</div></div>
+    </div>
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Date</th><th>Reg No</th><th>Name</th><th>Class</th><th>Type</th><th>Detail</th>
+        <th class="num">Cash</th><th class="num">Bank</th><th class="num">PhonePe</th><th class="num">Discount</th><th>Remark</th></tr></thead>
+      <tbody>${lastDateRangeRows.length ? lastDateRangeRows.map(r=>{
+        const detail = r.fee_type==="monthly" ? (r.for_months||[]).join(", ") : r.fee_type==="other" ? r.category_name : "—";
+        return `<tr><td>${formatDateTime(r.recorded_at)}</td><td>${escapeHtml(r.student_reg_no)}</td>
+        <td>${escapeHtml(r.student_name)}</td><td>${escapeHtml(CLASS_LABELS[r.student_class]||r.student_class)}</td>
+        <td>${r.fee_type==="admission_readmission"?"Admission/Readm.":r.fee_type[0].toUpperCase()+r.fee_type.slice(1)}</td>
+        <td>${escapeHtml(detail)}</td>
+        <td class="num">${money(r.amount_cash)}</td><td class="num">${money(r.amount_bank)}</td>
+        <td class="num">${money(r.amount_phonepe)}</td><td class="num">${money(r.discount)}</td>
+        <td>${escapeHtml(r.remark||"")}</td></tr>`;
+      }).join("") : `<tr><td colspan="11">No receipts in this range.</td></tr>`}</tbody>
+    </table></div>
+  `;
+}
+
+function exportDateRange() {
+  if (!lastDateRangeRows.length) { showToast("Generate a report first.", "error"); return; }
+  const aoa = [["Date","Reg No","Name","Class","Type","Detail","Cash","Bank","PhonePe","Discount","Remark"]];
+  lastDateRangeRows.forEach(r=>{
+    const detail = r.fee_type==="monthly" ? (r.for_months||[]).join(", ") : r.fee_type==="other" ? r.category_name : "";
+    aoa.push([
+      formatDateTime(r.recorded_at), r.student_reg_no, r.student_name, CLASS_LABELS[r.student_class]||r.student_class,
+      r.fee_type, detail, r.amount_cash, r.amount_bank, r.amount_phonepe, r.discount, r.remark||""
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report");
+  XLSX.writeFile(wb, `fee_collection_${document.getElementById("dStart").value}_to_${document.getElementById("dEnd").value}.xlsx`);
+}
+
+init();
+</script>
+</body>
+</html>

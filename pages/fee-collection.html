@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fee Collection — Greenfield High Portal</title>
+<link rel="stylesheet" href="../assets/css/common.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/menu.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  .fc-tabs { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
+  .fc-tab-btn { padding: 8px 16px; border-radius: var(--radius-md, 8px); border: 1px solid var(--ink, #ccc);
+                background: transparent; cursor: pointer; font-weight: 600; }
+  .fc-tab-btn.active { background: var(--brass, #b08d57); color: #fff; border-color: transparent; }
+  .fc-panel { display: none; }
+  .fc-panel.show { display: block; }
+  .fc-search-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .fc-search-row .field { flex: 1; min-width: 220px; margin-bottom: 0; }
+  .fc-student-card { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+                      padding: 14px 16px; border-radius: var(--radius-md,8px); background: rgba(176,141,87,.08);
+                      border: 1px solid rgba(176,141,87,.35); margin: 16px 0; }
+  .fc-student-card b { font-size: 1.05em; }
+  .fc-pick-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .fc-pick-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px;
+                  border: 1px solid var(--ink,#ddd); border-radius: var(--radius-md,8px); }
+  .fc-due-banner { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0; }
+  .fc-stat { padding: 10px 16px; border-radius: var(--radius-md,8px); background: rgba(0,0,0,.04); min-width: 140px; }
+  .fc-stat .label { font-size: .78em; opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
+  .fc-stat .value { font-size: 1.3em; font-weight: 700; }
+  .fc-stat.warn .value { color: var(--danger, #c0392b); }
+  .fc-stat.ok .value { color: var(--success, #2e7d32); }
+  .month-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap: 8px; margin: 14px 0; }
+  .mchip { padding: 10px 8px; border-radius: var(--radius-md,8px); text-align: center; font-size: .85em; }
+  .mchip .m { font-weight: 700; display: block; margin-bottom: 4px; }
+  .mchip.paid { background: #e3f5e6; color: #1e7d32; border: 1px solid #b7e2bd; }
+  .mchip.due { background: #fbe4e2; color: #b3261e; border: 1px solid #f2b8b4; }
+  .mchip.partial { background: #fff1da; color: #a15c00; border: 1px solid #ffdca3; }
+  .mchip.inactive { background: #f5f5f5; color: #b3b3b3; border: 1px dashed #ddd; }
+  .fc-bulk-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .fc-months-pick { max-height: 220px; overflow-y: auto; border: 1px solid #ddd; border-radius: var(--radius-md,8px);
+                    padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .fc-months-pick label { display: flex; justify-content: space-between; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+  .fc-months-pick label:hover { background: rgba(0,0,0,.04); }
+  .fc-amt-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  @media (max-width: 600px) { .fc-amt-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <div class="page-wrap enter-up">
+    <div class="page-header">
+      <span class="eyebrow">Accounts</span>
+      <h1>Fee Collection</h1>
+      <p>Search a student, then collect monthly, admission/readmission, or other fees.</p>
+    </div>
+
+    <div class="card">
+      <h3>Find Student</h3>
+      <div class="fc-search-row">
+        <div class="field">
+          <label for="searchInput">Reg No / Name / Mobile No</label>
+          <input class="input" id="searchInput" placeholder="Type to search..." />
+        </div>
+        <button class="btn btn-primary" id="searchBtn">Search</button>
+      </div>
+      <div id="pickArea"></div>
+      <div id="studentCardArea"></div>
+    </div>
+
+    <div id="workArea" style="display:none;">
+      <div class="fc-tabs">
+        <button class="fc-tab-btn active" data-tab="monthly">📅 Monthly Fee</button>
+        <button class="fc-tab-btn" data-tab="admission">🎓 Admission / Readmission</button>
+        <button class="fc-tab-btn" data-tab="other">➕ Other Fee</button>
+      </div>
+
+      <!-- MONTHLY -->
+      <section id="panel-monthly" class="fc-panel show card">
+        <h3>Monthly Fee</h3>
+        <div class="fc-due-banner" id="monthlyStats"></div>
+        <div class="month-grid" id="monthGrid"></div>
+        <button class="btn btn-primary" id="collectMonthlyBtn">Collect Monthly Fee</button>
+        <h4 style="margin-top:22px;">Payment History</h4>
+        <div id="monthlyHistory"></div>
+      </section>
+
+      <!-- ADMISSION / READMISSION -->
+      <section id="panel-admission" class="fc-panel card">
+        <h3>Admission / Readmission Fee</h3>
+        <div class="fc-due-banner" id="admissionStats"></div>
+        <button class="btn btn-primary" id="collectAdmissionBtn">Collect Admission / Readmission Fee</button>
+        <h4 style="margin-top:22px;">Payment History</h4>
+        <div id="admissionHistory"></div>
+      </section>
+
+      <!-- OTHER -->
+      <section id="panel-other" class="fc-panel card">
+        <h3>Other Fee</h3>
+        <button class="btn btn-primary" id="collectOtherBtn">Collect Other Fee</button>
+        <h4 style="margin-top:22px;">Payment History</h4>
+        <div id="otherHistory"></div>
+      </section>
+    </div>
+
+    <!-- BULK UPLOAD (independent of the student search above — each row has its own reg_no) -->
+    <div class="card">
+      <h3>Bulk Fee Upload</h3>
+      <p>Download a template for the fee type you're recording, fill it, then upload it back.</p>
+      <div class="fc-tabs">
+        <button class="fc-tab-btn active" data-bulk="monthly">Monthly</button>
+        <button class="fc-tab-btn" data-bulk="admission">Admission/Readmission</button>
+        <button class="fc-tab-btn" data-bulk="other">Other</button>
+      </div>
+      <div id="bulk-monthly" class="fc-panel show">
+        <div class="fc-bulk-row">
+          <button class="btn btn-ghost" id="tplMonthlyBtn">⬇ Download Template</button>
+          <input type="file" id="fileMonthly" accept=".xlsx,.xls" />
+          <button class="btn btn-accent" id="uploadMonthlyBtn">⬆ Upload</button>
+        </div>
+        <div id="resultMonthly" style="margin-top:10px;"></div>
+      </div>
+      <div id="bulk-admission" class="fc-panel">
+        <div class="fc-bulk-row">
+          <button class="btn btn-ghost" id="tplAdmissionBtn">⬇ Download Template</button>
+          <input type="file" id="fileAdmission" accept=".xlsx,.xls" />
+          <button class="btn btn-accent" id="uploadAdmissionBtn">⬆ Upload</button>
+        </div>
+        <div id="resultAdmission" style="margin-top:10px;"></div>
+      </div>
+      <div id="bulk-other" class="fc-panel">
+        <div class="fc-bulk-row">
+          <button class="btn btn-ghost" id="tplOtherBtn">⬇ Download Template</button>
+          <input type="file" id="fileOther" accept=".xlsx,.xls" />
+          <button class="btn btn-accent" id="uploadOtherBtn">⬆ Upload</button>
+        </div>
+        <div id="resultOther" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toastRoot" class="toast-stack"></div>
+
+<script>
+const PAGE_ID = "fee-collection"; // must match menu.js id
+let myAccess = null;
+let currentStudent = null;
+let ctx = null; // { monthlyRates, admissionRows, monthlyReceipts, admissionReceipts, otherReceipts, categories }
+
+const CLASS_LABELS = {
+  "4":"Class 4","5":"Class 5","6":"Class 6","7":"Class 7","8":"Class 8",
+  "9":"Class 9","10":"Class 10","11-arts":"Class 11 - Arts","11-science":"Class 11 - Science",
+  "12-arts":"Class 12 - Arts","12-science":"Class 12 - Science"
+};
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+/* =====================================================================
+   DUE-CALCULATION ENGINE
+   ===================================================================== */
+function ymKey(y,m){ return `${y}-${String(m).padStart(2,"0")}`; }
+function addMonth(y,m){ m++; if (m>12){ m=1; y++; } return {y,m}; }
+function monthsBetweenInclusive(y1,m1,y2,m2){
+  const out = []; let y=y1, m=m1, guard=0;
+  while ((y<y2 || (y===y2 && m<=m2)) && guard<600) {
+    out.push({y,m});
+    const n = addMonth(y,m); y=n.y; m=n.m; guard++;
+  }
+  return out;
+}
+function getAcademicWindow(klass, today){
+  const year = today.getFullYear();
+  if (["4","5","6","7","8","9"].includes(klass)) return monthsBetweenInclusive(year,1,year,12);
+  if (klass === "10") return monthsBetweenInclusive(year,1,year,3);
+  const ayStartYear = (today.getMonth()+1) >= 4 ? year : year-1; // 11/12 -> April to March
+  return monthsBetweenInclusive(ayStartYear,4, ayStartYear+1,3);
+}
+function getMonthlyRate(y,m, monthlyRatesSorted){
+  const monthEnd = new Date(y, m, 0, 23,59,59);
+  let rate = monthlyRatesSorted.length ? Number(monthlyRatesSorted[0].amount) : 0;
+  for (const r of monthlyRatesSorted) {
+    if (new Date(r.recorded_at) <= monthEnd) rate = Number(r.amount); else break;
+  }
+  return rate;
+}
+// Full ledger: all active months from admission/reactivation to today/deactivation,
+// payments applied oldest-month-first (FIFO), plus the current class's display window.
+function computeMonthlyLedger(student, monthlyRates, monthlyReceipts, today){
+  const monthlyRatesSorted = [...monthlyRates].sort((a,b)=> new Date(a.recorded_at)-new Date(b.recorded_at));
+  const start = new Date(student.reactivated_at || student.admission_date);
+  const end = (student.status === "deactivated" && student.deactivate_date) ? new Date(student.deactivate_date) : today;
+
+  const allMonths = monthsBetweenInclusive(start.getFullYear(), start.getMonth()+1, end.getFullYear(), end.getMonth()+1);
+  let pool = monthlyReceipts.reduce((s,r)=> s + Number(r.amount_cash)+Number(r.amount_bank)+Number(r.amount_phonepe)+Number(r.discount), 0);
+
+  const ledger = {}; let totalDue = 0;
+  for (const {y,m} of allMonths) {
+    const rate = getMonthlyRate(y,m,monthlyRatesSorted);
+    let status, due;
+    if (pool >= rate) { status="paid"; due=0; pool -= rate; }
+    else if (pool > 0) { status="partial"; due = rate-pool; pool=0; }
+    else { status="due"; due = rate; }
+    ledger[ymKey(y,m)] = { y,m,rate,status,due };
+    totalDue += due;
+  }
+
+  // Displayed months = the class's nominal session window UNIONED with
+  // every month the student has actually been active for, so a month
+  // with real due never gets dropped off the grid just because it falls
+  // outside the nominal window (e.g. a Class 10 student still active
+  // past March). Months before admission/reactivation and months after
+  // today/deactivation are both simply "inactive".
+  const nominal = getAcademicWindow(student.class, today);
+  const seen = new Set(); const merged = [];
+  [...nominal, ...allMonths].forEach(({y,m}) => {
+    const k = ymKey(y,m);
+    if (!seen.has(k)) { seen.add(k); merged.push({y,m,key:k}); }
+  });
+  merged.sort((a,b)=> a.y-b.y || a.m-b.m);
+
+  const windowMonths = merged.map(({y,m,key}) => {
+    const beforeStart = (y < start.getFullYear()) || (y===start.getFullYear() && m < start.getMonth()+1);
+    const afterEnd = (y > end.getFullYear()) || (y===end.getFullYear() && m > end.getMonth()+1);
+    if (beforeStart || afterEnd) return { y,m,key,label:`${MONTH_NAMES[m-1]} ${y}`, status:"inactive", due:0 };
+    const l = ledger[key];
+    return { y,m,key,label:`${MONTH_NAMES[m-1]} ${y}`, status:l.status, due:l.due };
+  });
+
+  const dueMonths = allMonths.map(({y,m})=>({ y,m,key:ymKey(y,m), ...ledger[ymKey(y,m)] }))
+    .filter(mo => mo.status==="due" || mo.status==="partial");
+
+  return { windowMonths, totalDue, ledgerByKey: ledger, dueMonths, start, end };
+}
+function computeAdmissionLedger(feeMasterRows, receipts){
+  const charged = feeMasterRows.filter(r=>r.type==="admission"||r.type==="readmission")
+    .reduce((s,r)=>s+Number(r.amount),0);
+  const paid = receipts.reduce((s,r)=> s+Number(r.amount_cash)+Number(r.amount_bank)+Number(r.amount_phonepe)+Number(r.discount),0);
+  return { charged, paid, due: Math.max(0, charged-paid) };
+}
+function money(n){ return "₹" + Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+/* =====================================================================
+   INIT
+   ===================================================================== */
+async function init() {
+  myAccess = await getMyAccess(PAGE_ID);
+  if (!myAccess.profile) return;
+
+  document.getElementById("searchBtn").addEventListener("click", runSearch);
+  document.getElementById("searchInput").addEventListener("keydown", e => { if (e.key==="Enter") runSearch(); });
+
+  document.querySelectorAll(".fc-tab-btn[data-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".fc-tab-btn[data-tab]").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll("#workArea .fc-panel").forEach(p=>p.classList.remove("show"));
+      btn.classList.add("active");
+      document.getElementById("panel-"+btn.dataset.tab).classList.add("show");
+    });
+  });
+  document.querySelectorAll(".fc-tab-btn[data-bulk]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".fc-tab-btn[data-bulk]").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll("[id^='bulk-']").forEach(p=>p.classList.remove("show"));
+      btn.classList.add("active");
+      document.getElementById("bulk-"+btn.dataset.bulk).classList.add("show");
+    });
+  });
+
+  document.getElementById("collectMonthlyBtn").addEventListener("click", openMonthlyModal);
+  document.getElementById("collectAdmissionBtn").addEventListener("click", openAdmissionModal);
+  document.getElementById("collectOtherBtn").addEventListener("click", openOtherModal);
+
+  document.getElementById("tplMonthlyBtn").addEventListener("click", ()=>downloadTemplate(
+    ["reg_no","months","amount_cash","amount_bank","amount_phonepe","discount","remark"],
+    ["2026001","2026-05;2026-06","1500","0","500","0","optional"], "monthly_fee_template.xlsx"));
+  document.getElementById("tplAdmissionBtn").addEventListener("click", ()=>downloadTemplate(
+    ["reg_no","amount_cash","amount_bank","amount_phonepe","discount","remark"],
+    ["2026001","2000","0","0","0","optional"], "admission_readmission_template.xlsx"));
+  document.getElementById("tplOtherBtn").addEventListener("click", ()=>downloadTemplate(
+    ["reg_no","category_name","amount_cash","amount_bank","amount_phonepe","discount","remark"],
+    ["2026001","Transport Fee","500","0","0","0","optional"], "other_fee_template.xlsx"));
+
+  document.getElementById("uploadMonthlyBtn").addEventListener("click", ()=>bulkUpload("monthly"));
+  document.getElementById("uploadAdmissionBtn").addEventListener("click", ()=>bulkUpload("admission"));
+  document.getElementById("uploadOtherBtn").addEventListener("click", ()=>bulkUpload("other"));
+}
+
+/* =====================================================================
+   SEARCH
+   ===================================================================== */
+async function runSearch() {
+  const term = document.getElementById("searchInput").value.trim();
+  const pickArea = document.getElementById("pickArea");
+  pickArea.innerHTML = "";
+  if (!term) { showToast("Type something to search.", "error"); return; }
+
+  const { data, error } = await supabaseClient.from("student_master").select("*")
+    .or(`reg_no.ilike.%${term}%,name.ilike.%${term}%,mobile_no.ilike.%${term}%`)
+    .limit(20);
+
+  if (error) { showToast("Search failed: " + error.message, "error"); return; }
+  if (!data || data.length === 0) { showToast("No student found.", "error"); return; }
+
+  if (data.length === 1) { await selectStudent(data[0]); return; }
+
+  pickArea.innerHTML = `<p style="margin-top:10px;">${data.length} matches — pick one:</p>
+    <div class="fc-pick-list">${data.map(s => `
+      <div class="fc-pick-item">
+        <span>${escapeHtml(s.name)} — ${escapeHtml(s.reg_no)} — ${escapeHtml(CLASS_LABELS[s.class]||s.class)} — ${escapeHtml(s.mobile_no)}</span>
+        <button class="btn btn-ghost btn-sm" data-reg="${escapeHtml(s.reg_no)}">Select</button>
+      </div>`).join("")}</div>`;
+  pickArea.querySelectorAll("button[data-reg]").forEach(btn=>{
+    btn.addEventListener("click", async ()=>{
+      const s = data.find(x=>x.reg_no===btn.dataset.reg);
+      await selectStudent(s);
+    });
+  });
+}
+
+async function selectStudent(student) {
+  currentStudent = student;
+  document.getElementById("pickArea").innerHTML = "";
+  document.getElementById("studentCardArea").innerHTML = `
+    <div class="fc-student-card">
+      <div>
+        <b>${escapeHtml(student.name)}</b> (${escapeHtml(student.reg_no)}) — ${escapeHtml(CLASS_LABELS[student.class]||student.class)}<br/>
+        Father: ${escapeHtml(student.father_name)} • Mobile: ${escapeHtml(student.mobile_no)}
+      </div>
+      <div>${statusBadge(student.status)}</div>
+    </div>`;
+  document.getElementById("workArea").style.display = "block";
+  await loadContext();
+}
+
+async function loadContext() {
+  const regNo = currentStudent.reg_no;
+  const [{ data: feeMaster }, { data: receipts }, { data: categories }] = await Promise.all([
+    supabaseClient.from("fee_master").select("*").eq("student_reg_no", regNo),
+    supabaseClient.from("fee_receipts").select("*").eq("student_reg_no", regNo).order("recorded_at", { ascending: false }),
+    supabaseClient.from("fee_categories").select("*").eq("active", true).order("name")
+  ]);
+
+  ctx = {
+    monthlyRates: (feeMaster||[]).filter(r=>r.type==="monthly"),
+    feeMaster: feeMaster||[],
+    monthlyReceipts: (receipts||[]).filter(r=>r.fee_type==="monthly"),
+    admissionReceipts: (receipts||[]).filter(r=>r.fee_type==="admission_readmission"),
+    otherReceipts: (receipts||[]).filter(r=>r.fee_type==="other"),
+    categories: categories||[]
+  };
+
+  renderMonthly();
+  renderAdmission();
+  renderOther();
+}
+
+/* =====================================================================
+   MONTHLY PANEL
+   ===================================================================== */
+function renderMonthly() {
+  const today = new Date();
+  const led = computeMonthlyLedger(currentStudent, ctx.monthlyRates, ctx.monthlyReceipts, today);
+  ctx.monthlyLedger = led;
+
+  document.getElementById("monthlyStats").innerHTML = `
+    <div class="fc-stat ${led.totalDue>0?'warn':'ok'}"><div class="label">Total Due</div><div class="value">${money(led.totalDue)}</div></div>
+  `;
+
+  document.getElementById("monthGrid").innerHTML = led.windowMonths.map(mo => `
+    <div class="mchip ${mo.status}">
+      <span class="m">${mo.label}</span>
+      ${mo.status==="paid" ? "Paid" : mo.status==="inactive" ? "Inactive" : money(mo.due)+" due"}
+    </div>`).join("");
+
+  const hist = ctx.monthlyReceipts;
+  const canEdit = myAccess.level === "full";
+  document.getElementById("monthlyHistory").innerHTML = hist.length ? `
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Date</th><th>Months</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEdit?"<th></th>":""}</tr></thead>
+      <tbody>${hist.map(r=>`<tr>
+        <td>${formatDateTime(r.recorded_at)}</td>
+        <td>${(r.for_months||[]).join(", ") || "—"}</td>
+        <td>${money(r.amount_cash)}</td><td>${money(r.amount_bank)}</td><td>${money(r.amount_phonepe)}</td>
+        <td>${money(r.discount)}</td><td>${escapeHtml(r.remark||"")}</td>
+        ${canEdit?`<td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditReceiptModal('${r.receipt_id}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteReceipt('${r.receipt_id}')">Delete</button>
+        </td>`:""}
+      </tr>`).join("")}</tbody>
+    </table></div>` : `<div class="empty-state"><p>No monthly payments yet.</p></div>`;
+}
+
+function openMonthlyModal() {
+  const led = ctx.monthlyLedger;
+  const pickList = led.dueMonths.map(mo => `
+    <label>
+      <span><input type="checkbox" class="monthPick" value="${mo.key}" /> ${MONTH_NAMES[mo.m-1]} ${mo.y}</span>
+      <span>${money(mo.due)}</span>
+    </label>`).join("") || "<p>No pending months — this will be recorded as an advance payment.</p>";
+
+  openModal({
+    title: "Collect Monthly Fee",
+    subtitle: `${currentStudent.name} (${currentStudent.reg_no})`,
+    bodyHtml: `
+      <div class="field"><label>Months this payment covers</label>
+        <div class="fc-months-pick" id="monthPickBox">${pickList}</div>
+      </div>
+      <div class="fc-amt-grid">
+        <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="mCash" value="0" /></div>
+        <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="mBank" value="0" /></div>
+        <div class="field"><label>PhonePe</label><input class="input" type="number" min="0" step="0.01" id="mPhonePe" value="0" /></div>
+      </div>
+      <div class="field"><label>Discount</label><input class="input" type="number" min="0" step="0.01" id="mDiscount" value="0" /></div>
+      <div class="field"><label>Remark (optional)</label><input class="input" id="mRemark" /></div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="mSaveBtn">Save Payment</button>`,
+    onOpen: () => {
+      const autoTick = () => {
+        const total = ["mCash","mBank","mPhonePe","mDiscount"].reduce((s,id)=> s + (parseFloat(document.getElementById(id).value)||0), 0);
+        let remaining = total;
+        document.querySelectorAll(".monthPick").forEach((cb, i) => {
+          const due = led.dueMonths[i].due;
+          if (remaining >= due && due > 0) { cb.checked = true; remaining -= due; }
+          else if (remaining > 0) { cb.checked = true; remaining = 0; }
+          else { cb.checked = false; }
+        });
+      };
+      ["mCash","mBank","mPhonePe","mDiscount"].forEach(id => document.getElementById(id).addEventListener("input", autoTick));
+      document.getElementById("mSaveBtn").onclick = async () => {
+        const cash = parseFloat(document.getElementById("mCash").value)||0;
+        const bank = parseFloat(document.getElementById("mBank").value)||0;
+        const phonepe = parseFloat(document.getElementById("mPhonePe").value)||0;
+        const discount = parseFloat(document.getElementById("mDiscount").value)||0;
+        if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
+        const months = Array.from(document.querySelectorAll(".monthPick:checked")).map(cb=>cb.value);
+        const remark = document.getElementById("mRemark").value.trim();
+
+        const btn = document.getElementById("mSaveBtn");
+        btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const payload = {
+          student_reg_no: currentStudent.reg_no, fee_type: "monthly",
+          for_months: months.length ? months : null,
+          amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
+          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+        };
+        const { error } = await supabaseClient.from("fee_receipts").insert(payload);
+        if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Payment"; return; }
+        await logAudit("fee_receipts", currentStudent.reg_no, "insert", null, payload);
+        closeModal();
+        showToast("Monthly fee collected.", "success");
+        await loadContext();
+      };
+    }
+  });
+}
+
+/* =====================================================================
+   ADMISSION / READMISSION PANEL
+   ===================================================================== */
+function renderAdmission() {
+  const led = computeAdmissionLedger(ctx.feeMaster, ctx.admissionReceipts);
+  ctx.admissionLedger = led;
+  document.getElementById("admissionStats").innerHTML = `
+    <div class="fc-stat"><div class="label">Charged</div><div class="value">${money(led.charged)}</div></div>
+    <div class="fc-stat ok"><div class="label">Paid</div><div class="value">${money(led.paid)}</div></div>
+    <div class="fc-stat ${led.due>0?'warn':'ok'}"><div class="label">Due</div><div class="value">${money(led.due)}</div></div>
+  `;
+  const hist = ctx.admissionReceipts;
+  const canEditA = myAccess.level === "full";
+  document.getElementById("admissionHistory").innerHTML = hist.length ? `
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Date</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEditA?"<th></th>":""}</tr></thead>
+      <tbody>${hist.map(r=>`<tr>
+        <td>${formatDateTime(r.recorded_at)}</td>
+        <td>${money(r.amount_cash)}</td><td>${money(r.amount_bank)}</td><td>${money(r.amount_phonepe)}</td>
+        <td>${money(r.discount)}</td><td>${escapeHtml(r.remark||"")}</td>
+        ${canEditA?`<td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditReceiptModal('${r.receipt_id}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteReceipt('${r.receipt_id}')">Delete</button>
+        </td>`:""}
+      </tr>`).join("")}</tbody>
+    </table></div>` : `<div class="empty-state"><p>No admission/readmission payments yet.</p></div>`;
+}
+
+function openAdmissionModal() {
+  openModal({
+    title: "Collect Admission / Readmission Fee",
+    subtitle: `${currentStudent.name} (${currentStudent.reg_no}) — Due: ${money(ctx.admissionLedger.due)}`,
+    bodyHtml: `
+      <div class="fc-amt-grid">
+        <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="adCash" value="0" /></div>
+        <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="adBank" value="0" /></div>
+        <div class="field"><label>PhonePe</label><input class="input" type="number" min="0" step="0.01" id="adPhonePe" value="0" /></div>
+      </div>
+      <div class="field"><label>Discount</label><input class="input" type="number" min="0" step="0.01" id="adDiscount" value="0" /></div>
+      <div class="field"><label>Remark (optional)</label><input class="input" id="adRemark" /></div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="adSaveBtn">Save Payment</button>`,
+    onOpen: () => {
+      document.getElementById("adSaveBtn").onclick = async () => {
+        const cash = parseFloat(document.getElementById("adCash").value)||0;
+        const bank = parseFloat(document.getElementById("adBank").value)||0;
+        const phonepe = parseFloat(document.getElementById("adPhonePe").value)||0;
+        const discount = parseFloat(document.getElementById("adDiscount").value)||0;
+        if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
+        const remark = document.getElementById("adRemark").value.trim();
+        const btn = document.getElementById("adSaveBtn");
+        btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const payload = {
+          student_reg_no: currentStudent.reg_no, fee_type: "admission_readmission",
+          amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
+          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+        };
+        const { error } = await supabaseClient.from("fee_receipts").insert(payload);
+        if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Payment"; return; }
+        await logAudit("fee_receipts", currentStudent.reg_no, "insert", null, payload);
+        closeModal();
+        showToast("Admission/Readmission fee collected.", "success");
+        await loadContext();
+      };
+    }
+  });
+}
+
+/* =====================================================================
+   OTHER FEE PANEL
+   ===================================================================== */
+function renderOther() {
+  const hist = ctx.otherReceipts;
+  const canEditO = myAccess.level === "full";
+  document.getElementById("otherHistory").innerHTML = hist.length ? `
+    <div class="table-wrap"><table class="data">
+      <thead><tr><th>Date</th><th>Category</th><th>Cash</th><th>Bank</th><th>PhonePe</th><th>Discount</th><th>Remark</th>${canEditO?"<th></th>":""}</tr></thead>
+      <tbody>${hist.map(r=>{
+        const cat = ctx.categories.find(c=>c.category_id===r.category_id);
+        return `<tr>
+        <td>${formatDateTime(r.recorded_at)}</td><td>${escapeHtml(cat?cat.name:"—")}</td>
+        <td>${money(r.amount_cash)}</td><td>${money(r.amount_bank)}</td><td>${money(r.amount_phonepe)}</td>
+        <td>${money(r.discount)}</td><td>${escapeHtml(r.remark||"")}</td>
+        ${canEditO?`<td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditReceiptModal('${r.receipt_id}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteReceipt('${r.receipt_id}')">Delete</button>
+        </td>`:""}
+      </tr>`;}).join("")}</tbody>
+    </table></div>` : `<div class="empty-state"><p>No other-fee payments yet.</p></div>`;
+}
+
+function openOtherModal() {
+  openModal({
+    title: "Collect Other Fee",
+    subtitle: `${currentStudent.name} (${currentStudent.reg_no})`,
+    bodyHtml: `
+      <div class="field"><label>Category</label>
+        <div style="display:flex; gap:8px;">
+          <select class="input" id="oCategory">
+            ${ctx.categories.map(c=>`<option value="${c.category_id}">${escapeHtml(c.name)}</option>`).join("")}
+          </select>
+          <button class="btn btn-ghost" id="oNewCatBtn" type="button">+ New</button>
+        </div>
+      </div>
+      <div id="oNewCatRow" style="display:none; gap:8px; margin:-6px 0 12px;">
+        <input class="input" id="oNewCatName" placeholder="New category name" />
+        <button class="btn btn-accent" id="oNewCatSaveBtn" type="button">Add</button>
+      </div>
+      <div class="fc-amt-grid">
+        <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="oCash" value="0" /></div>
+        <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="oBank" value="0" /></div>
+        <div class="field"><label>PhonePe</label><input class="input" type="number" min="0" step="0.01" id="oPhonePe" value="0" /></div>
+      </div>
+      <div class="field"><label>Discount</label><input class="input" type="number" min="0" step="0.01" id="oDiscount" value="0" /></div>
+      <div class="field"><label>Remark (optional)</label><input class="input" id="oRemark" /></div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="oSaveBtn">Save Payment</button>`,
+    onOpen: () => {
+      document.getElementById("oNewCatBtn").onclick = () => {
+        document.getElementById("oNewCatRow").style.display = "flex";
+      };
+      document.getElementById("oNewCatSaveBtn").onclick = async () => {
+        const name = document.getElementById("oNewCatName").value.trim();
+        if (!name) return;
+        const { data, error } = await supabaseClient.from("fee_categories")
+          .insert({ name, created_by: myAccess.profile.user_id }).select().single();
+        if (error) { showToast("Could not add category: " + error.message, "error"); return; }
+        ctx.categories.push(data);
+        const sel = document.getElementById("oCategory");
+        sel.innerHTML = ctx.categories.map(c=>`<option value="${c.category_id}">${escapeHtml(c.name)}</option>`).join("");
+        sel.value = data.category_id;
+        document.getElementById("oNewCatRow").style.display = "none";
+        showToast("Category added.", "success");
+      };
+      document.getElementById("oSaveBtn").onclick = async () => {
+        const categoryId = document.getElementById("oCategory").value;
+        if (!categoryId) { showToast("Choose or add a category.", "error"); return; }
+        const cash = parseFloat(document.getElementById("oCash").value)||0;
+        const bank = parseFloat(document.getElementById("oBank").value)||0;
+        const phonepe = parseFloat(document.getElementById("oPhonePe").value)||0;
+        const discount = parseFloat(document.getElementById("oDiscount").value)||0;
+        if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
+        const remark = document.getElementById("oRemark").value.trim();
+        const btn = document.getElementById("oSaveBtn");
+        btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const payload = {
+          student_reg_no: currentStudent.reg_no, fee_type: "other", category_id: categoryId,
+          amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
+          remark: remark || null, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+        };
+        const { error } = await supabaseClient.from("fee_receipts").insert(payload);
+        if (error) { showToast("Save failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Payment"; return; }
+        await logAudit("fee_receipts", currentStudent.reg_no, "insert", null, payload);
+        closeModal();
+        showToast("Other fee collected.", "success");
+        await loadContext();
+      };
+    }
+  });
+}
+
+/* =====================================================================
+   EDIT / DELETE RECEIPTS — full access only
+   ===================================================================== */
+function findReceipt(receiptId) {
+  return ctx.monthlyReceipts.find(r=>r.receipt_id===receiptId)
+      || ctx.admissionReceipts.find(r=>r.receipt_id===receiptId)
+      || ctx.otherReceipts.find(r=>r.receipt_id===receiptId);
+}
+
+function openEditReceiptModal(receiptId) {
+  if (myAccess.level !== "full") return;
+  const r = findReceipt(receiptId);
+  if (!r) return;
+
+  const extraFieldHtml = r.fee_type === "monthly"
+    ? `<div class="field"><label>Months (comma-separated, e.g. 2026-05, 2026-06)</label>
+         <input class="input" id="erMonths" value="${escapeHtml((r.for_months||[]).join(", "))}" /></div>`
+    : r.fee_type === "other"
+    ? `<div class="field"><label>Category</label>
+         <select class="input" id="erCategory">
+           ${ctx.categories.map(c=>`<option value="${c.category_id}" ${c.category_id===r.category_id?'selected':''}>${escapeHtml(c.name)}</option>`).join("")}
+         </select></div>`
+    : "";
+
+  openModal({
+    title: "Edit Payment",
+    subtitle: `${currentStudent.name} (${currentStudent.reg_no}) — ${formatDateTime(r.recorded_at)}`,
+    bodyHtml: `
+      ${extraFieldHtml}
+      <div class="fc-amt-grid">
+        <div class="field"><label>Cash</label><input class="input" type="number" min="0" step="0.01" id="erCash" value="${r.amount_cash}" /></div>
+        <div class="field"><label>Bank</label><input class="input" type="number" min="0" step="0.01" id="erBank" value="${r.amount_bank}" /></div>
+        <div class="field"><label>PhonePe</label><input class="input" type="number" min="0" step="0.01" id="erPhonePe" value="${r.amount_phonepe}" /></div>
+      </div>
+      <div class="field"><label>Discount</label><input class="input" type="number" min="0" step="0.01" id="erDiscount" value="${r.discount}" /></div>
+      <div class="field"><label>Remark</label><input class="input" id="erRemark" value="${escapeHtml(r.remark||'')}" /></div>
+    `,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-primary" id="erSaveBtn">Save Changes</button>`,
+    onOpen: () => {
+      document.getElementById("erSaveBtn").onclick = async () => {
+        const cash = parseFloat(document.getElementById("erCash").value)||0;
+        const bank = parseFloat(document.getElementById("erBank").value)||0;
+        const phonepe = parseFloat(document.getElementById("erPhonePe").value)||0;
+        const discount = parseFloat(document.getElementById("erDiscount").value)||0;
+        if (cash+bank+phonepe+discount <= 0) { showToast("Enter an amount.", "error"); return; }
+        const remark = document.getElementById("erRemark").value.trim();
+
+        const updated = {
+          amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
+          remark: remark || null
+        };
+        if (r.fee_type === "monthly") {
+          const raw = document.getElementById("erMonths").value.trim();
+          updated.for_months = raw ? raw.split(",").map(s=>s.trim()).filter(Boolean) : null;
+        }
+        if (r.fee_type === "other") {
+          updated.category_id = document.getElementById("erCategory").value;
+        }
+
+        const btn = document.getElementById("erSaveBtn");
+        btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+        const { error } = await supabaseClient.from("fee_receipts").update(updated).eq("receipt_id", receiptId);
+        if (error) { showToast("Update failed: " + error.message, "error"); btn.disabled=false; btn.textContent="Save Changes"; return; }
+        await logAudit("fee_receipts", currentStudent.reg_no, "update", r, updated);
+        closeModal();
+        showToast("Payment updated.", "success");
+        await loadContext();
+      };
+    }
+  });
+}
+
+function confirmDeleteReceipt(receiptId) {
+  if (myAccess.level !== "full") return;
+  const r = findReceipt(receiptId);
+  if (!r) return;
+
+  openModal({
+    title: "Delete this payment?",
+    subtitle: "This cannot be undone — due amounts will recalculate immediately after deletion.",
+    bodyHtml: `<p>Delete the ${money(r.amount_cash+r.amount_bank+r.amount_phonepe+r.discount)} payment recorded on ${escapeHtml(formatDateTime(r.recorded_at))}?</p>`,
+    footHtml: `<button class="btn btn-ghost" data-close>Cancel</button>
+               <button class="btn btn-danger" id="drSaveBtn">Delete</button>`,
+    onOpen: () => {
+      document.getElementById("drSaveBtn").onclick = async () => {
+        const { error } = await supabaseClient.from("fee_receipts").delete().eq("receipt_id", receiptId);
+        if (error) { showToast("Delete failed: " + error.message, "error"); return; }
+        await logAudit("fee_receipts", currentStudent.reg_no, "delete", r, null);
+        closeModal();
+        showToast("Payment deleted.", "success");
+        await loadContext();
+      };
+    }
+  });
+}
+
+/* =====================================================================
+   BULK UPLOAD (works even without a student selected above)
+   ===================================================================== */
+function downloadTemplate(headers, sample, filename) {
+  const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Template");
+  XLSX.writeFile(wb, filename);
+}
+function readWorkbook(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(sheet, { defval: "" }));
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function bulkUpload(kind) {
+  const fileInput = document.getElementById(kind==="monthly"?"fileMonthly":kind==="admission"?"fileAdmission":"fileOther");
+  const resultBox = document.getElementById(kind==="monthly"?"resultMonthly":kind==="admission"?"resultAdmission":"resultOther");
+  if (!fileInput.files.length) { showToast("Choose a file first.", "error"); return; }
+
+  const rows = await readWorkbook(fileInput.files[0]);
+  let ok = 0, fail = 0; const errors = [];
+
+  for (const row of rows) {
+    const regNo = String(row.reg_no || "").trim();
+    if (!regNo) continue;
+
+    const { data: student } = await supabaseClient.from("student_master").select("reg_no").eq("reg_no", regNo).maybeSingle();
+    if (!student) { fail++; errors.push(`${regNo}: not found`); continue; }
+
+    const cash = parseFloat(row.amount_cash||0)||0;
+    const bank = parseFloat(row.amount_bank||0)||0;
+    const phonepe = parseFloat(row.amount_phonepe||0)||0;
+    const discount = parseFloat(row.discount||0)||0;
+    if (cash+bank+phonepe+discount <= 0) { fail++; errors.push(`${regNo}: no amount entered`); continue; }
+    const remark = row.remark ? String(row.remark).trim() : null;
+
+    let payload = {
+      student_reg_no: regNo, amount_cash: cash, amount_bank: bank, amount_phonepe: phonepe, discount,
+      remark, recorded_by: myAccess.profile.user_id, recorded_at: new Date().toISOString()
+    };
+
+    if (kind === "monthly") {
+      payload.fee_type = "monthly";
+      payload.for_months = row.months ? String(row.months).split(";").map(s=>s.trim()).filter(Boolean) : null;
+    } else if (kind === "admission") {
+      payload.fee_type = "admission_readmission";
+    } else {
+      const catName = String(row.category_name||"").trim();
+      if (!catName) { fail++; errors.push(`${regNo}: category_name required`); continue; }
+      let { data: cat } = await supabaseClient.from("fee_categories").select("*").eq("name", catName).maybeSingle();
+      if (!cat) {
+        const { data: newCat, error: catErr } = await supabaseClient.from("fee_categories")
+          .insert({ name: catName, created_by: myAccess.profile.user_id }).select().single();
+        if (catErr) { fail++; errors.push(`${regNo}: could not create category — ${catErr.message}`); continue; }
+        cat = newCat;
+      }
+      payload.fee_type = "other";
+      payload.category_id = cat.category_id;
+    }
+
+    const { error } = await supabaseClient.from("fee_receipts").insert(payload);
+    if (error) { fail++; errors.push(`${regNo}: ${error.message}`); } else { ok++; }
+  }
+
+  resultBox.innerHTML = `<p>${ok} recorded, ${fail} failed.</p>` +
+    (errors.length ? `<div class="field-error show">${errors.map(escapeHtml).join("<br/>")}</div>` : "");
+  showToast(`Bulk upload done: ${ok} success, ${fail} failed.`, fail ? "error" : "success");
+  fileInput.value = "";
+  if (currentStudent) await loadContext();
+}
+
+init();
+</script>
+</body>
+</html>
