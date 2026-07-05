@@ -26,6 +26,26 @@ const MENU_ITEMS = [
   limitedAccess: ["viewer"],         // can add (admission/readmission) only
   order: 3
    },
+   {
+  id: "fee-collection",
+  label: "Fee Collection",
+  icon: "💰",
+  file: "pages/fee-collection.html",
+  group: "Accounts",
+  fullAccess: ["admin", "editor"],   // can correct/delete receipts
+  limitedAccess: ["viewer"],         // can collect fees, cannot correct/delete
+  order: 4
+},
+{
+  id: "fee-due-report",
+  label: "Fee Due & Reports",
+  icon: "📊",
+  file: "pages/fee-due-report.html",
+  group: "Accounts",
+  fullAccess: ["admin", "editor"],
+  limitedAccess: ["viewer"],         // read-only reports either way
+  order: 5
+},
   {
     id: "manage-users",
     label: "Approve Users",
